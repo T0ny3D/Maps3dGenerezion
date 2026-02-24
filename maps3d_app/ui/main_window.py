@@ -2,33 +2,45 @@ from __future__ import annotations
 
 from pathlib import Path
 
+
 from PySide6.QtCore import QObject, QThread, Signal
+
+
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QFileDialog,
     QFormLayout,
+
     QGroupBox,
+
+
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QMainWindow,
     QMessageBox,
+
     QPlainTextEdit,
     QProgressBar,
     QPushButton,
     QScrollArea,
+    QPushButton
     QVBoxLayout,
     QWidget,
 )
 
 from ..core.blender_backend import estimate_relief_mm
+
 from ..core.dem_downloader import download_srtm_dem_for_bbox
 from ..core.pipeline import GenerateConfig, compute_gpx_bbox_lonlat, default_dem_output_path_for_gpx, run_pipeline
 from .preview3d import Preview3DWidget
+from ..core.pipeline import GenerateConfig, run_pipeline
+
 
 QUALITY_TO_GRID = {"fast": 200, "high": 400, "ultra": 700}
 PRINTER_PROFILE_TO_VALUES = {"bambu": (0.22, 0.9), "voron": (0.28, 1.0)}
+
 
 
 class Worker(QObject):
@@ -49,10 +61,12 @@ class Worker(QObject):
             self.failed.emit(str(exc))
 
 
+
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle("GPX to 3D STL")
+
         self.setMinimumSize(1280, 820)
 
         self._thread: QThread | None = None
@@ -60,6 +74,12 @@ class MainWindow(QMainWindow):
 
         self.gpx_path = QLineEdit()
         self.dem_path = QLineEdit()
+        self.setMinimumWidth(760)
+
+        self.gpx_path = QLineEdit()
+        self.dem_path = QLineEdit()
+
+
         self.backend = QComboBox()
         self.backend.addItem("Blender (consigliato)", userData="blender")
         self.backend.addItem("Python", userData="python")
@@ -81,6 +101,9 @@ class MainWindow(QMainWindow):
         self.separate_frame.setChecked(True)
         self.frame_text_enabled = QCheckBox()
         self.frame_text_enabled.setChecked(True)
+
+
+
         self.flush_mode = QComboBox()
         self.flush_mode.addItem("Incassata", userData="recessed")
 
@@ -89,12 +112,14 @@ class MainWindow(QMainWindow):
         self.track_inlay_enabled = QCheckBox()
         self.track_inlay_enabled.setChecked(True)
 
+
         self.show_frame = QCheckBox("Mostra cornice")
         self.show_frame.setChecked(True)
         self.show_ams = QCheckBox("Mostra layer AMS")
         self.show_ams.setChecked(True)
         self.show_track = QCheckBox("Mostra traccia")
         self.show_track.setChecked(True)
+
 
         self.title_text = QLineEdit("")
         self.subtitle_text = QLineEdit("")
@@ -131,6 +156,7 @@ class MainWindow(QMainWindow):
         self.text_depth_mm = QLineEdit("1.2")
 
         self.test_mode = QCheckBox()
+
         self.test_mode_info = QLabel("")
 
         self.download_dem_btn = QPushButton("Scarica DEM (SRTM 30m)")
@@ -153,6 +179,11 @@ class MainWindow(QMainWindow):
         self.log = QPlainTextEdit()
         self.log.setReadOnly(True)
         self.preview = Preview3DWidget()
+        self.test_mode.setChecked(False)
+        self.test_mode_info = QLabel("")
+
+        self.relief_estimate = QLabel("Rilievo massimo stimato (mm): -")
+
 
         self._build_ui()
         self._apply_printer_profile_defaults()
@@ -161,6 +192,7 @@ class MainWindow(QMainWindow):
     def _build_ui(self) -> None:
         root = QWidget()
         self.setCentralWidget(root)
+
         layout = QHBoxLayout(root)
 
         left = self._build_controls_column()
@@ -175,6 +207,9 @@ class MainWindow(QMainWindow):
 
         files = QGroupBox("Input")
         f = QFormLayout(files)
+        layout = QVBoxLayout(root)
+
+
         gpx_row = QHBoxLayout()
         gpx_row.addWidget(self.gpx_path)
         gpx_btn = QPushButton("Apri GPX")
@@ -183,7 +218,10 @@ class MainWindow(QMainWindow):
 
         dem_row = QHBoxLayout()
         dem_row.addWidget(self.dem_path)
+
         dem_btn = QPushButton("Apri DEM")
+        dem_btn = QPushButton("Apri DEM (GeoTIFF)")
+
         dem_btn.clicked.connect(self._select_dem)
         dem_row.addWidget(dem_btn)
 
@@ -192,6 +230,7 @@ class MainWindow(QMainWindow):
         blender_btn = QPushButton("Sfoglia")
         blender_btn.clicked.connect(self._select_blender_exe)
         blender_row.addWidget(blender_btn)
+
 
         f.addRow("GPX:", gpx_row)
         f.addRow("DEM:", dem_row)
@@ -284,12 +323,70 @@ class MainWindow(QMainWindow):
 
     def _append_log(self, text: str) -> None:
         self.log.appendPlainText(text)
+        form = QFormLayout()
+        form.addRow("GPX:", gpx_row)
+        form.addRow("DEM:", dem_row)
+        form.addRow("Backend:", self.backend)
+        form.addRow("Qualità:", self.quality)
+        form.addRow("Stampante:", self.printer_profile)
+        form.addRow("Percorso Blender.exe (opzionale):", blender_row)
+
+        form.addRow("AMS 4 colori mappa:", self.ams_enabled)
+        form.addRow("Traccia rossa a incastro:", self.track_inlay_enabled)
+        form.addRow("Cornice separata:", self.separate_frame)
+        form.addRow("Test incastro (40×40 mm):", self.test_mode)
+        form.addRow("Modalità cornice:", self.flush_mode)
+        form.addRow("Testi sulla cornice:", self.frame_text_enabled)
+        form.addRow("Titolo:", self.title_text)
+        form.addRow("Sottotitolo:", self.subtitle_text)
+        form.addRow("Etichetta N:", self.label_n)
+        form.addRow("Etichetta S:", self.label_s)
+        form.addRow("Etichetta E:", self.label_e)
+        form.addRow("Etichetta O:", self.label_w)
+
+        form.addRow("Dimensione X (mm):", self.size_x)
+        form.addRow("Dimensione Y (mm):", self.size_y)
+        form.addRow("Spessore base (mm):", self.base_mm)
+        form.addRow("Scala verticale:", self.vertical_scale)
+        form.addRow("Altezza traccia legacy (mm):", self.track_height)
+
+        form.addRow("groove_width_mm:", self.groove_width_mm)
+        form.addRow("groove_depth_mm:", self.groove_depth_mm)
+        form.addRow("groove_chamfer_mm:", self.groove_chamfer_mm)
+        form.addRow("track_clearance_mm:", self.track_clearance_mm)
+        form.addRow("track_relief_mm:", self.track_relief_mm)
+        form.addRow("track_top_radius_mm:", self.track_top_radius_mm)
+
+        form.addRow("frame_wall_mm:", self.frame_wall_mm)
+        form.addRow("frame_height_mm:", self.frame_height_mm)
+        form.addRow("lip_depth_mm:", self.lip_depth_mm)
+        form.addRow("clearance_mm:", self.clearance_mm)
+        form.addRow("recess_mm:", self.recess_mm)
+        form.addRow("lead_in_mm:", self.lead_in_mm)
+        form.addRow("finger_notch_radius_mm:", self.finger_notch_radius_mm)
+        form.addRow("rim_mm:", self.rim_mm)
+
+        form.addRow("Modalità testo:", self.text_mode)
+        form.addRow("text_depth_mm:", self.text_depth_mm)
+
+        generate_btn = QPushButton("Genera STL")
+        generate_btn.clicked.connect(self._generate)
+
+        self.status = QLabel("Pronto")
+        layout.addLayout(form)
+        layout.addWidget(self.relief_estimate)
+        layout.addWidget(self.test_mode_info)
+        layout.addWidget(generate_btn)
+        layout.addWidget(self.status)
+
 
     def _select_gpx(self) -> None:
         path, _ = QFileDialog.getOpenFileName(self, "Seleziona GPX", "", "GPX files (*.gpx)")
         if path:
             self.gpx_path.setText(path)
+
             self.download_dem_btn.setEnabled(True)
+
 
     def _select_dem(self) -> None:
         path, _ = QFileDialog.getOpenFileName(self, "Seleziona DEM", "", "GeoTIFF (*.tif *.tiff)")
@@ -300,6 +397,7 @@ class MainWindow(QMainWindow):
         path, _ = QFileDialog.getOpenFileName(self, "Seleziona blender.exe", "", "Executable (*.exe);;All files (*.*)")
         if path:
             self.blender_exe_path.setText(path)
+
 
     def _run_background(self, fn, on_done, what: str) -> None:
         if self._thread is not None:
@@ -357,6 +455,7 @@ class MainWindow(QMainWindow):
 
         self._run_background(task, done, "download DEM")
 
+
     def _on_test_mode_toggled(self, enabled: bool) -> None:
         if enabled:
             self.test_mode_info.setText("Verranno generati due STL di test: test_map e test_frame")
@@ -412,6 +511,7 @@ class MainWindow(QMainWindow):
             track_relief_mm=float(self.track_relief_mm.text()),
             track_top_radius_mm=float(self.track_top_radius_mm.text()),
         )
+
 
     def _collect_preview_paths(self, base_out: Path, config: GenerateConfig) -> list[tuple[Path, tuple[float, float, float, float], str]]:
         suffix = "_test" if config.test_mode else ""
@@ -485,3 +585,44 @@ class MainWindow(QMainWindow):
             self._load_preview_from_outputs()
 
         self._run_background(task, done, "generazione STL")
+    def _generate(self) -> None:
+        try:
+            gpx = self.gpx_path.text().strip()
+            dem = self.dem_path.text().strip()
+            if not gpx or not dem:
+                raise ValueError("Seleziona sia GPX che DEM.")
+
+            config = self._build_config()
+            relief_mm = estimate_relief_mm(gpx, dem, config)
+            self.relief_estimate.setText(f"Rilievo massimo stimato (mm): {relief_mm:.2f}")
+            if relief_mm > 60.0:
+                QMessageBox.warning(self, "Warning rilievo alto", f"Rilievo massimo stimato elevato: {relief_mm:.2f} mm (> 60 mm).\nLa generazione continua comunque.")
+
+            default_name = f"{Path(gpx).stem}.stl"
+            output_path, _ = QFileDialog.getSaveFileName(self, "Salva base nome STL", default_name, "STL (*.stl)")
+            if not output_path:
+                return
+
+            backend_value = str(self.backend.currentData())
+            blender_path = self.blender_exe_path.text().strip() or None
+            self.status.setText(f"Generazione in corso... backend: {backend_value}")
+
+            run_pipeline(gpx_path=gpx, dem_path=dem, stl_output_path=output_path, config=config, backend=backend_value, blender_exe_path=blender_path)
+
+            base_out = Path(output_path)
+            suffix = "_test" if config.test_mode else ""
+            msg = (
+                f"MAP BASE (brown):\n{base_out.with_name(base_out.stem + suffix + '_base_brown.stl')}"
+                f"\nWATER: \n{base_out.with_name(base_out.stem + suffix + '_water.stl')}"
+                f"\nGREEN: \n{base_out.with_name(base_out.stem + suffix + '_green.stl')}"
+                f"\nDETAIL: \n{base_out.with_name(base_out.stem + suffix + '_detail.stl')}"
+                f"\nTRACK INLAY RED: \n{base_out.with_name(base_out.stem + suffix + '_track_inlay_red.stl')}"
+            )
+            if config.separate_frame:
+                msg += f"\n\nFRAME STL:\n{base_out.with_name(base_out.stem + suffix + '_frame.stl')}"
+            self.status.setText("Generazione completata")
+            QMessageBox.information(self, "Completato", msg)
+        except Exception as exc:  # noqa: BLE001
+            self.status.setText("Errore")
+            QMessageBox.critical(self, "Errore", str(exc))
+

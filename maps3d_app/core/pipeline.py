@@ -176,6 +176,7 @@ def run_pipeline(
 generate_stl_from_gpx_dem = run_python_pipeline
 
 
+
 def compute_gpx_bbox_lonlat(gpx_path: str | Path, margin_ratio: float = 0.20) -> tuple[float, float, float, float]:
     points_lonlat = load_gpx_points(gpx_path)
     return _compute_bbox(points_lonlat, margin_ratio)
@@ -184,3 +185,4 @@ def compute_gpx_bbox_lonlat(gpx_path: str | Path, margin_ratio: float = 0.20) ->
 def default_dem_output_path_for_gpx(gpx_path: str | Path) -> Path:
     gpx = Path(gpx_path)
     return gpx.parent / "output" / "dem_srtm.tif"
+

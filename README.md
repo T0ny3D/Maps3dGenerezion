@@ -81,3 +81,4 @@ La GUI include una preview 3D embedded (pyqtgraph OpenGL) dentro la finestra:
 Note driver OpenGL:
 - se vedi schermo nero, aggiorna i driver GPU
 - in ambienti problematici prova esecuzione con renderer/software OpenGL del sistema
+
