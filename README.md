@@ -64,3 +64,21 @@ La cornice resta in modalità **incassata premium** con:
 - **PETG**: aggiungere ~+0.05 mm rispetto al valore PLA
 
 La UI include i profili preimpostati Bambu/Voron/Personalizzato.
+
+## DEM automatico SRTM
+
+1. Seleziona il file GPX.
+2. Clicca **Scarica DEM (SRTM 30m)** (bbox GPX + margine 20%).
+3. Quando il DEM è pronto, clicca **Genera STL**.
+
+## Anteprima 3D embedded
+
+La GUI include una preview 3D embedded (pyqtgraph OpenGL) dentro la finestra:
+- carica gli STL generati (base, layer AMS, traccia, cornice)
+- permette di centrare/zoomare automaticamente il modello
+- mostra log operazioni e progresso generazione/download senza bloccare la UI
+
+Note driver OpenGL:
+- se vedi schermo nero, aggiorna i driver GPU
+- in ambienti problematici prova esecuzione con renderer/software OpenGL del sistema
+
