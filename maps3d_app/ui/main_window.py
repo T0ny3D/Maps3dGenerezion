@@ -119,9 +119,9 @@ class MainWindow(QMainWindow):
         self.label_e = QLineEdit("E")
         self.label_w = QLineEdit("O")
 
-        # Dimension and sizing parameters
-        self.size_x = QLineEdit("150")
-        self.size_y = QLineEdit("150")
+        # Dimension and sizing parameters (FIXED: 120x120 mm)
+        self.size_x = QLineEdit("120")
+        self.size_y = QLineEdit("120")
         self.base_mm = QLineEdit("5")
         self.vertical_scale = QLineEdit("1.0")
         self.track_height = QLineEdit("2")
@@ -448,22 +448,23 @@ class MainWindow(QMainWindow):
         )
 
     def _collect_preview_paths(self, base_out: Path, config: GenerateConfig) -> list[tuple[Path, tuple[float, float, float, float], str]]:
-        suffix = "_test" if config.test_mode else ""
+        stem = base_out.stem
+        prefix = "_test_" if config.test_mode else "_"
         out = [
-            (base_out.with_name(base_out.stem + suffix + "_base_brown.stl"), (0.47, 0.31, 0.18, 1.0), "base"),
+            (base_out.with_name(stem + prefix + "base_brown.stl"), (0.47, 0.31, 0.18, 1.0), "base"),
         ]
         if self.show_ams.isChecked():
             out.extend(
                 [
-                    (base_out.with_name(base_out.stem + suffix + "_water.stl"), (0.2, 0.45, 0.95, 0.95), "water"),
-                    (base_out.with_name(base_out.stem + suffix + "_green.stl"), (0.18, 0.70, 0.25, 0.95), "green"),
-                    (base_out.with_name(base_out.stem + suffix + "_detail.stl"), (0.9, 0.87, 0.78, 0.95), "detail"),
+                    (base_out.with_name(stem + prefix + "water.stl"), (0.2, 0.45, 0.95, 0.95), "water"),
+                    (base_out.with_name(stem + prefix + "green.stl"), (0.18, 0.70, 0.25, 0.95), "green"),
+                    (base_out.with_name(stem + prefix + "detail.stl"), (0.9, 0.87, 0.78, 0.95), "detail"),
                 ]
             )
         if self.show_track.isChecked():
-            out.append((base_out.with_name(base_out.stem + suffix + "_track_inlay_red.stl"), (0.9, 0.1, 0.1, 1.0), "track"))
+            out.append((base_out.with_name(stem + prefix + "track_inlay_red.stl"), (0.9, 0.1, 0.1, 1.0), "track"))
         if config.separate_frame and self.show_frame.isChecked():
-            out.append((base_out.with_name(base_out.stem + suffix + "_frame.stl"), (0.6, 0.6, 0.62, 0.9), "frame"))
+            out.append((base_out.with_name(stem + prefix + "frame.stl"), (0.6, 0.6, 0.62, 0.9), "frame"))
         return out
 
     def _load_preview_from_outputs(self) -> None:
