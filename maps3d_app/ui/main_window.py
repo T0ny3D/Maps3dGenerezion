@@ -74,6 +74,9 @@ class MainWindow(QMainWindow):
         self.backend = QComboBox()
         self.backend.addItem("Blender (consigliato)", userData="blender")
         self.backend.addItem("Python", userData="python")
+        idx = self.backend.findData("blender")
+        if idx >= 0:
+            self.backend.setCurrentIndex(idx)
 
         self.quality = QComboBox()
         self.quality.addItem("Fast", userData="fast")
@@ -119,7 +122,7 @@ class MainWindow(QMainWindow):
         self.label_e = QLineEdit("E")
         self.label_w = QLineEdit("O")
 
-        # Dimension and sizing parameters (FIXED: 120x120 mm)
+        # Dimension and sizing parameters (FIXED 120x120)
         self.size_x = QLineEdit("120")
         self.size_y = QLineEdit("120")
         self.base_mm = QLineEdit("5")
@@ -183,6 +186,7 @@ class MainWindow(QMainWindow):
 
         self._build_ui()
         self._apply_printer_profile_defaults()
+        self._auto_detect_blender_exe()
 
     def _build_ui(self) -> None:
         root = QWidget()
@@ -321,9 +325,35 @@ class MainWindow(QMainWindow):
 
     def _select_gpx(self) -> None:
         path, _ = QFileDialog.getOpenFileName(self, "Seleziona GPX", "", "GPX files (*.gpx)")
-        if path:
-            self.gpx_path.setText(path)
-            self.download_dem_btn.setEnabled(True)
+        if not path:
+            return
+
+        self.gpx_path.setText(path)
+        self.download_dem_btn.setEnabled(True)
+
+        # Log bbox + point count
+        try:
+            from ..core.gpx_loader import load_gpx_lonlat
+
+            points = load_gpx_lonlat(path)  # list[(lon, lat)]
+            num_points = len(points)
+            min_lon, min_lat, max_lon, max_lat = compute_gpx_bbox_lonlat(path, margin_ratio=0.20)
+            self._append_log(
+                f"GPX caricato: {num_points} punti, bbox=[{min_lon:.4f}, {min_lat:.4f}, {max_lon:.4f}, {max_lat:.4f}]"
+            )
+        except Exception as exc:  # noqa: BLE001
+            try:
+                min_lon, min_lat, max_lon, max_lat = compute_gpx_bbox_lonlat(path, margin_ratio=0.20)
+                self._append_log(
+                    f"GPX caricato, bbox=[{min_lon:.4f}, {min_lat:.4f}, {max_lon:.4f}, {max_lat:.4f}] (punti non letti: {exc})"
+                )
+            except Exception as exc2:  # noqa: BLE001
+                self._append_log(f"Errore lettura GPX/bbox: {exc2}")
+
+        # Auto-download DEM if not set
+        if not self.dem_path.text().strip():
+            self._append_log("DEM non impostato: avvio download automatico...")
+            self._download_dem()
 
     def _select_dem(self) -> None:
         path, _ = QFileDialog.getOpenFileName(self, "Seleziona DEM", "", "GeoTIFF (*.tif *.tiff)")
@@ -334,6 +364,50 @@ class MainWindow(QMainWindow):
         path, _ = QFileDialog.getOpenFileName(self, "Seleziona blender.exe", "", "Executable (*.exe);;All files (*.*)")
         if path:
             self.blender_exe_path.setText(path)
+
+    def _auto_detect_blender_exe(self) -> None:
+        """Auto-detect blender.exe on Windows common paths if not already set."""
+        if self.blender_exe_path.text().strip():
+            return
+
+        import os
+        import platform
+        import glob
+
+        if platform.system() != "Windows":
+            return
+
+        direct_paths = [
+            r"C:\Program Files\Blender Foundation\Blender\blender.exe",
+            r"C:\Program Files (x86)\Blender Foundation\Blender\blender.exe",
+        ]
+
+        wildcard_patterns = [
+            r"C:\Program Files\Blender Foundation\Blender*\blender.exe",
+            r"C:\Program Files (x86)\Blender Foundation\Blender*\blender.exe",
+        ]
+
+        localappdata = os.environ.get("LOCALAPPDATA")
+        if localappdata:
+            wildcard_patterns.append(
+                rf"{localappdata}\Programs\Blender Foundation\Blender*\blender.exe"
+            )
+
+        for p in direct_paths:
+            if Path(p).exists():
+                self.blender_exe_path.setText(p)
+                self._append_log(f"Blender rilevato: {p}")
+                return
+
+        for pat in wildcard_patterns:
+            matches = glob.glob(pat)
+            if matches:
+                found = sorted(matches)[-1]
+                self.blender_exe_path.setText(found)
+                self._append_log(f"Blender rilevato: {found}")
+                return
+
+        self._append_log("Blender non rilevato automaticamente. Usa 'Sfoglia' per selezionarlo.")
 
     def _run_background(self, fn, on_done, what: str) -> None:
         if self._thread is not None:
@@ -447,12 +521,16 @@ class MainWindow(QMainWindow):
             track_top_radius_mm=float(self.track_top_radius_mm.text()),
         )
 
-    def _collect_preview_paths(self, base_out: Path, config: GenerateConfig) -> list[tuple[Path, tuple[float, float, float, float], str]]:
+    def _collect_preview_paths(
+        self, base_out: Path, config: GenerateConfig
+    ) -> list[tuple[Path, tuple[float, float, float, float], str]]:
         stem = base_out.stem
         prefix = "_test_" if config.test_mode else "_"
+
         out = [
             (base_out.with_name(stem + prefix + "base_brown.stl"), (0.47, 0.31, 0.18, 1.0), "base"),
         ]
+
         if self.show_ams.isChecked():
             out.extend(
                 [
@@ -461,10 +539,13 @@ class MainWindow(QMainWindow):
                     (base_out.with_name(stem + prefix + "detail.stl"), (0.9, 0.87, 0.78, 0.95), "detail"),
                 ]
             )
+
         if self.show_track.isChecked():
             out.append((base_out.with_name(stem + prefix + "track_inlay_red.stl"), (0.9, 0.1, 0.1, 1.0), "track"))
+
         if config.separate_frame and self.show_frame.isChecked():
             out.append((base_out.with_name(stem + prefix + "frame.stl"), (0.6, 0.6, 0.62, 0.9), "frame"))
+
         return out
 
     def _load_preview_from_outputs(self) -> None:
