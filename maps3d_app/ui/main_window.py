@@ -3,7 +3,6 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import QObject, QThread, Signal
-
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -90,6 +89,10 @@ class MainWindow(QMainWindow):
         self.printer_profile.addItem("Voron 2.4", userData="voron")
         self.printer_profile.addItem("Personalizzato", userData="custom")
         self.printer_profile.currentIndexChanged.connect(self._apply_printer_profile_defaults)
+
+        # 3MF export option (Bambu)
+        self.export_3mf = QCheckBox("Genera anche 3MF (Bambu)")
+        self.export_3mf.setChecked(True)
 
         # Frame options
         self.separate_frame = QCheckBox()
@@ -232,6 +235,7 @@ class MainWindow(QMainWindow):
         f.addRow("Backend:", self.backend)
         f.addRow("Qualità:", self.quality)
         f.addRow("Stampante:", self.printer_profile)
+        f.addRow("", self.export_3mf)
         f.addRow("Blender.exe:", blender_row)
         l.addWidget(files)
 
@@ -320,7 +324,6 @@ class MainWindow(QMainWindow):
         return right
 
     def _append_log(self, text: str) -> None:
-        """Append text to the log widget."""
         self.log.appendPlainText(text)
 
     def _select_gpx(self) -> None:
@@ -335,7 +338,7 @@ class MainWindow(QMainWindow):
         try:
             from ..core.gpx_loader import load_gpx_lonlat
 
-            points = load_gpx_lonlat(path)  # list[(lon, lat)]
+            points = load_gpx_lonlat(path)
             num_points = len(points)
             min_lon, min_lat, max_lon, max_lat = compute_gpx_bbox_lonlat(path, margin_ratio=0.20)
             self._append_log(
@@ -350,7 +353,6 @@ class MainWindow(QMainWindow):
             except Exception as exc2:  # noqa: BLE001
                 self._append_log(f"Errore lettura GPX/bbox: {exc2}")
 
-        # Auto-download DEM if not set
         if not self.dem_path.text().strip():
             self._append_log("DEM non impostato: avvio download automatico...")
             self._download_dem()
@@ -366,7 +368,6 @@ class MainWindow(QMainWindow):
             self.blender_exe_path.setText(path)
 
     def _auto_detect_blender_exe(self) -> None:
-        """Auto-detect blender.exe on Windows common paths if not already set."""
         if self.blender_exe_path.text().strip():
             return
 
@@ -389,9 +390,7 @@ class MainWindow(QMainWindow):
 
         localappdata = os.environ.get("LOCALAPPDATA")
         if localappdata:
-            wildcard_patterns.append(
-                rf"{localappdata}\Programs\Blender Foundation\Blender*\blender.exe"
-            )
+            wildcard_patterns.append(rf"{localappdata}\Programs\Blender Foundation\Blender*\blender.exe")
 
         for p in direct_paths:
             if Path(p).exists():
@@ -566,7 +565,6 @@ class MainWindow(QMainWindow):
         self.preview.frame_all()
 
     def _generate(self) -> None:
-        """Generate 3D model asynchronously in background thread."""
         gpx = self.gpx_path.text().strip()
         dem = self.dem_path.text().strip()
         if not gpx or not dem:
@@ -587,9 +585,7 @@ class MainWindow(QMainWindow):
             self._append_log(f"stima rilievo non disponibile: {exc}")
 
         default_name = f"{Path(gpx).stem}.stl"
-        output_path, _ = QFileDialog.getSaveFileName(
-            self, "Salva base nome STL", default_name, "STL (*.stl)"
-        )
+        output_path, _ = QFileDialog.getSaveFileName(self, "Salva base nome STL", default_name, "STL (*.stl)")
         if not output_path:
             return
 
@@ -597,7 +593,9 @@ class MainWindow(QMainWindow):
         blender_path = self.blender_exe_path.text().strip() or None
         self.status.setText(f"Generazione in corso ({backend_value})...")
 
-        def task() -> Path:
+        export_3mf_enabled = self.export_3mf.isChecked()
+
+        def task() -> tuple[Path, Path | None, str | None]:
             run_pipeline(
                 gpx_path=gpx,
                 dem_path=dem,
@@ -606,12 +604,30 @@ class MainWindow(QMainWindow):
                 backend=backend_value,
                 blender_exe_path=blender_path,
             )
-            return Path(output_path)
+            out_base = Path(output_path)
 
-        def done(out_base: Path) -> None:
+            out_3mf: Path | None = None
+            export_err: str | None = None
+            if export_3mf_enabled:
+                try:
+                    from ..export_3mf import create_3mf_from_stl_output_base
+                    out_3mf = create_3mf_from_stl_output_base(out_base, test_mode=config.test_mode)
+                except Exception as exc:  # noqa: BLE001
+                    export_err = str(exc)
+
+            return out_base, out_3mf, export_err
+
+        def done(result: tuple[Path, Path | None, str | None]) -> None:
+            out_base, out_3mf, export_err = result
             self._last_output_base = out_base
             self.status.setText("Generazione completata")
             self._append_log(f"output base: {out_base}")
+
+            if export_err is not None:
+                self._append_log(f"Errore esportazione 3MF: {export_err}")
+            elif out_3mf is not None:
+                self._append_log(f"3MF esportato: {out_3mf}")
+
             self._load_preview_from_outputs()
 
         self._run_background(task, done, "generazione STL")
