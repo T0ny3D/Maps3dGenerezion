@@ -476,7 +476,15 @@ class MainWindow(QMainWindow):
         def task():
             min_lon, min_lat, max_lon, max_lat = compute_gpx_bbox_lonlat(gpx, margin_ratio=0.20)
             out_dem = default_dem_output_path_for_gpx(gpx)
-            return download_srtm_dem_for_bbox(min_lon, min_lat, max_lon, max_lat, out_dem)
+            try:
+                return download_srtm_dem_for_bbox(min_lon, min_lat, max_lon, max_lat, out_dem)
+            except Exception as exc:  # noqa: BLE001
+                raise RuntimeError(
+                    f"Download DEM fallito.\n"
+                    f"bbox=[{min_lon:.4f},{min_lat:.4f},{max_lon:.4f},{max_lat:.4f}]\n"
+                    f"output atteso: {out_dem}\n"
+                    f"Dettaglio: {exc}"
+                ) from exc
 
         def done(path: Path) -> None:
             self.dem_path.setText(str(path))
@@ -617,19 +625,36 @@ class MainWindow(QMainWindow):
 
         backend_value = str(self.backend.currentData())
         blender_path = self.blender_exe_path.text().strip() or None
+
+        if backend_value == "blender" and (not blender_path or not Path(blender_path).exists()):
+            reply = QMessageBox.question(
+                self,
+                "Blender non trovato",
+                "Blender non trovato. Seleziona blender.exe oppure usa il backend Python.\nUsare il backend Python per questa generazione?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.Yes,
+            )
+            if reply == QMessageBox.StandardButton.Yes:
+                backend_value = "python"
+            else:
+                return
+
         self.status.setText(f"Generazione in corso ({backend_value})...")
 
         export_3mf_enabled = self.export_3mf.isChecked()
 
         def task() -> tuple[Path, Path | None, str | None]:
-            run_pipeline(
-                gpx_path=gpx,
-                dem_path=dem,
-                stl_output_path=output_path,
-                config=config,
-                backend=backend_value,
-                blender_exe_path=blender_path,
-            )
+            try:
+                run_pipeline(
+                    gpx_path=gpx,
+                    dem_path=dem,
+                    stl_output_path=output_path,
+                    config=config,
+                    backend=backend_value,
+                    blender_exe_path=blender_path,
+                )
+            except Exception as exc:  # noqa: BLE001
+                raise RuntimeError(f"Errore pipeline [{backend_value}]: {exc}") from exc
             out_base = Path(output_path)
 
             out_3mf: Path | None = None
