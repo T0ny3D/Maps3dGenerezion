@@ -57,7 +57,7 @@ class Worker(QObject):
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
-        self.setWindowTitle("GPX to 3D STL")
+        self.setWindowTitle("GPX to 3D STL / 3MF")
         self.setMinimumSize(1280, 820)
         self.setMinimumWidth(760)
 
@@ -68,6 +68,10 @@ class MainWindow(QMainWindow):
         self.gpx_path = QLineEdit()
         self.dem_path = QLineEdit()
         self.blender_exe_path = QLineEdit()
+
+        # Output folder (zero-manual)
+        self.out_dir = QLineEdit()
+        self.out_dir.setPlaceholderText("Cartella output (vuota = cartella del GPX)")
 
         # Backend and quality
         self.backend = QComboBox()
@@ -170,7 +174,7 @@ class MainWindow(QMainWindow):
         self.preview_btn = QPushButton("Carica anteprima 3D")
         self.preview_btn.clicked.connect(self._load_preview_from_outputs)
 
-        self.generate_btn = QPushButton("Genera STL")
+        self.generate_btn = QPushButton("Genera")
         self.generate_btn.setMinimumHeight(48)
         self.generate_btn.clicked.connect(self._generate)
 
@@ -229,9 +233,16 @@ class MainWindow(QMainWindow):
         blender_btn.clicked.connect(self._select_blender_exe)
         blender_row.addWidget(blender_btn)
 
+        out_row = QHBoxLayout()
+        out_row.addWidget(self.out_dir)
+        out_btn = QPushButton("Sfoglia")
+        out_btn.clicked.connect(self._select_out_dir)
+        out_row.addWidget(out_btn)
+
         f.addRow("GPX:", gpx_row)
         f.addRow("DEM:", dem_row)
         f.addRow("", self.download_dem_btn)
+        f.addRow("Output:", out_row)
         f.addRow("Backend:", self.backend)
         f.addRow("Qualità:", self.quality)
         f.addRow("Stampante:", self.printer_profile)
@@ -326,6 +337,11 @@ class MainWindow(QMainWindow):
     def _append_log(self, text: str) -> None:
         self.log.appendPlainText(text)
 
+    def _select_out_dir(self) -> None:
+        path = QFileDialog.getExistingDirectory(self, "Seleziona cartella output")
+        if path:
+            self.out_dir.setText(path)
+
     def _select_gpx(self) -> None:
         path, _ = QFileDialog.getOpenFileName(self, "Seleziona GPX", "", "GPX files (*.gpx)")
         if not path:
@@ -333,6 +349,10 @@ class MainWindow(QMainWindow):
 
         self.gpx_path.setText(path)
         self.download_dem_btn.setEnabled(True)
+
+        # Default output dir = folder del GPX (solo se non impostato)
+        if not self.out_dir.text().strip():
+            self.out_dir.setText(str(Path(path).parent))
 
         # Log bbox + point count
         try:
@@ -412,6 +432,7 @@ class MainWindow(QMainWindow):
         if self._thread is not None:
             QMessageBox.warning(self, "Operazione in corso", "Attendere il completamento dell'operazione corrente.")
             return
+
         self.progress.setRange(0, 0)
         self.generate_btn.setEnabled(False)
         self.download_dem_btn.setEnabled(False)
@@ -551,6 +572,7 @@ class MainWindow(QMainWindow):
         if self._last_output_base is None:
             QMessageBox.information(self, "Anteprima", "Genera prima almeno un set STL o seleziona output durante la generazione.")
             return
+
         cfg = self._build_config()
         self.preview.clear()
         for path, color, name in self._collect_preview_paths(self._last_output_base, cfg):
@@ -571,6 +593,15 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Input mancanti", "Seleziona sia GPX che DEM.")
             return
 
+        # output base automatico
+        out_dir = Path(self.out_dir.text().strip() or Path(gpx).parent)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        output_base = out_dir / Path(gpx).stem
+        output_path = str(output_base.with_suffix(".stl"))
+
+        self._append_log(f"Output dir: {out_dir}")
+        self._append_log(f"Output base: {output_base}")
+
         config = self._build_config()
         try:
             relief_mm = estimate_relief_mm(gpx, dem, config)
@@ -583,11 +614,6 @@ class MainWindow(QMainWindow):
                 )
         except Exception as exc:  # noqa: BLE001
             self._append_log(f"stima rilievo non disponibile: {exc}")
-
-        default_name = f"{Path(gpx).stem}.stl"
-        output_path, _ = QFileDialog.getSaveFileName(self, "Salva base nome STL", default_name, "STL (*.stl)")
-        if not output_path:
-            return
 
         backend_value = str(self.backend.currentData())
         blender_path = self.blender_exe_path.text().strip() or None
@@ -630,4 +656,4 @@ class MainWindow(QMainWindow):
 
             self._load_preview_from_outputs()
 
-        self._run_background(task, done, "generazione STL")
+        self._run_background(task, done, "generazione")
