@@ -45,9 +45,9 @@ jobs:
           name: Maps3DGen-Windows
           path: dist/Maps3DGen.exe
 
-      - name: Upload EXE to GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: dist/Maps3DGen.exe
+      - name: Upload EXE to GitHub Release (gh cli)
+        shell: pwsh
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload ${{ github.ref_name }} dist/Maps3DGen.exe --clobber
