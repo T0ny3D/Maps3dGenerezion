@@ -354,24 +354,14 @@ class MainWindow(QMainWindow):
         if not self.out_dir.text().strip():
             self.out_dir.setText(str(Path(path).parent))
 
-        # Log bbox + point count
+        # Log bbox (senza contare punti)
         try:
-            from ..core.gpx_loader import load_gpx_lonlat
-
-            points = load_gpx_lonlat(path)
-            num_points = len(points)
             min_lon, min_lat, max_lon, max_lat = compute_gpx_bbox_lonlat(path, margin_ratio=0.20)
             self._append_log(
-                f"GPX caricato: {num_points} punti, bbox=[{min_lon:.4f}, {min_lat:.4f}, {max_lon:.4f}, {max_lat:.4f}]"
+                f"GPX caricato, bbox=[{min_lon:.4f}, {min_lat:.4f}, {max_lon:.4f}, {max_lat:.4f}]"
             )
         except Exception as exc:  # noqa: BLE001
-            try:
-                min_lon, min_lat, max_lon, max_lat = compute_gpx_bbox_lonlat(path, margin_ratio=0.20)
-                self._append_log(
-                    f"GPX caricato, bbox=[{min_lon:.4f}, {min_lat:.4f}, {max_lon:.4f}, {max_lat:.4f}] (punti non letti: {exc})"
-                )
-            except Exception as exc2:  # noqa: BLE001
-                self._append_log(f"Errore lettura GPX/bbox: {exc2}")
+            self._append_log(f"Errore lettura GPX/bbox: {exc}")
 
         # Auto-download DEM if not set
         if not self.dem_path.text().strip():
@@ -384,7 +374,9 @@ class MainWindow(QMainWindow):
             self.dem_path.setText(path)
 
     def _select_blender_exe(self) -> None:
-        path, _ = QFileDialog.getOpenFileName(self, "Seleziona blender.exe", "", "Executable (*.exe);;All files (*.*)")
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Seleziona blender.exe", "", "Executable (*.exe);;All files (*.*)"
+        )
         if path:
             self.blender_exe_path.setText(path)
 
@@ -580,7 +572,11 @@ class MainWindow(QMainWindow):
 
     def _load_preview_from_outputs(self) -> None:
         if self._last_output_base is None:
-            QMessageBox.information(self, "Anteprima", "Genera prima almeno un set STL o seleziona output durante la generazione.")
+            QMessageBox.information(
+                self,
+                "Anteprima",
+                "Genera prima almeno un set STL o seleziona output durante la generazione.",
+            )
             return
 
         cfg = self._build_config()
