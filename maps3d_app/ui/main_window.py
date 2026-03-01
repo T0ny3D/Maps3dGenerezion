@@ -373,6 +373,7 @@ class MainWindow(QMainWindow):
             except Exception as exc2:  # noqa: BLE001
                 self._append_log(f"Errore lettura GPX/bbox: {exc2}")
 
+        # Auto-download DEM if not set
         if not self.dem_path.text().strip():
             self._append_log("DEM non impostato: avvio download automatico...")
             self._download_dem()
@@ -388,6 +389,7 @@ class MainWindow(QMainWindow):
             self.blender_exe_path.setText(path)
 
     def _auto_detect_blender_exe(self) -> None:
+        """Auto-detect blender.exe on Windows common paths if not already set."""
         if self.blender_exe_path.text().strip():
             return
 
@@ -655,6 +657,7 @@ class MainWindow(QMainWindow):
                 )
             except Exception as exc:  # noqa: BLE001
                 raise RuntimeError(f"Errore pipeline [{backend_value}]: {exc}") from exc
+
             out_base = Path(output_path)
 
             out_3mf: Path | None = None
@@ -662,6 +665,7 @@ class MainWindow(QMainWindow):
             if export_3mf_enabled:
                 try:
                     from ..export_3mf import create_3mf_from_stl_output_base
+
                     out_3mf = create_3mf_from_stl_output_base(out_base, test_mode=config.test_mode)
                 except Exception as exc:  # noqa: BLE001
                     export_err = str(exc)
