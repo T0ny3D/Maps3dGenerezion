@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 import os
+import platform
 import subprocess
 import time
 from pathlib import Path
@@ -29,7 +30,16 @@ def _validate_area(min_lon: float, min_lat: float, max_lon: float, max_lat: floa
         raise ValueError(f"Area troppo estesa ({w_km:.1f}x{h_km:.1f} km). Limite 200 km.")
 
 
-def _try_elevation_clip(
+def _kill_process_tree_windows(pid: int) -> None:
+    # /T = termina child processes, /F = forza
+    subprocess.run(
+        ["taskkill", "/PID", str(pid), "/T", "/F"],
+        capture_output=True,
+        text=True,
+    )
+
+
+def _run_elevation_clip_hard(
     *,
     min_lon: float,
     min_lat: float,
@@ -41,8 +51,8 @@ def _try_elevation_clip(
     env: dict[str, str],
 ) -> tuple[bool, str]:
     """
-    Run elevation clip with a HARD timeout.
-    Returns: (success, diagnostic_output)
+    Run `elevation clip` with a HARD timeout that kills the full process tree on Windows.
+    Returns (ok, diag).
     """
     cmd = [
         "elevation",
@@ -57,29 +67,36 @@ def _try_elevation_clip(
     ]
 
     try:
-        res = subprocess.run(
+        p = subprocess.Popen(
             cmd,
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
             env=env,
-            timeout=timeout_s,
         )
-        out = (res.stdout or "") + ("\n" + res.stderr if res.stderr else "")
-        ok = (res.returncode == 0) and out_path.exists() and out_path.stat().st_size > 0
-        return ok, out.strip()
-
-    except subprocess.TimeoutExpired as exc:
-        out = ""
-        if exc.stdout:
-            out += exc.stdout
-        if exc.stderr:
-            out += "\n" + exc.stderr
-        return False, f"[timeout {timeout_s}s] elevation clip product={product}\n{out.strip()}"
-
     except FileNotFoundError as exc:
         raise RuntimeError(
-            "Comando 'elevation' non trovato. Assicurati che la dependency 'elevation' sia installata."
+            "Comando 'elevation' non trovato. Nella build EXE deve essere presente la dependency 'elevation'."
         ) from exc
+
+    try:
+        stdout, stderr = p.communicate(timeout=timeout_s)
+    except subprocess.TimeoutExpired:
+        # kill tree (important on Windows)
+        if platform.system() == "Windows":
+            _kill_process_tree_windows(p.pid)
+        else:
+            p.kill()
+        try:
+            stdout, stderr = p.communicate(timeout=10)
+        except Exception:
+            stdout, stderr = "", ""
+        diag = f"[timeout {timeout_s}s] elevation clip product={product}\n{stdout}\n{stderr}".strip()
+        return False, diag
+
+    out = (stdout or "") + ("\n" + stderr if stderr else "")
+    ok = (p.returncode == 0) and out_path.exists() and out_path.stat().st_size > 0
+    return ok, out.strip()
 
 
 def download_srtm_dem_for_bbox(
@@ -88,17 +105,16 @@ def download_srtm_dem_for_bbox(
     max_lon: float,
     max_lat: float,
     out_tif_path: str | Path,
-    timeout_s: int = 90,
-    retries: int = 2,
+    timeout_s: int = 120,
+    retries: int = 1,
 ) -> Path:
     """
     Download+clip SRTM DEM for bbox using `elevation clip`.
 
-    Robust behavior:
-    - HARD timeout per attempt (default 90s)
+    Robust:
+    - HARD timeout per attempt (kills process tree on Windows)
     - retry
     - fallback SRTM1 -> SRTM3
-    - clean partial outputs
     """
     _validate_area(min_lon, min_lat, max_lon, max_lat)
 
@@ -110,15 +126,13 @@ def download_srtm_dem_for_bbox(
     cache_dir.mkdir(parents=True, exist_ok=True)
     env["ELEVATION_DATA"] = str(cache_dir)
 
-    # reuse if already exists
     if out_path.exists() and out_path.stat().st_size > 0:
         return out_path
 
     attempts: list[tuple[str, int]] = []
-    # SRTM1 attempts then fallback to SRTM3
     for _ in range(retries + 1):
         attempts.append(("SRTM1", timeout_s))
-    attempts.append(("SRTM3", max(timeout_s, 120)))
+    attempts.append(("SRTM3", max(timeout_s, 180)))
 
     last_diag = ""
     for product, to_s in attempts:
@@ -129,7 +143,7 @@ def download_srtm_dem_for_bbox(
             except OSError:
                 pass
 
-        ok, diag = _try_elevation_clip(
+        ok, diag = _run_elevation_clip_hard(
             min_lon=min_lon,
             min_lat=min_lat,
             max_lon=max_lon,
@@ -144,7 +158,6 @@ def download_srtm_dem_for_bbox(
         if ok:
             return out_path
 
-        # small backoff before retry
         time.sleep(1.0)
 
     raise RuntimeError(
