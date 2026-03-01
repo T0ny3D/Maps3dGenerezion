@@ -21,20 +21,15 @@ def _validate_area(min_lon: float, min_lat: float, max_lon: float, max_lat: floa
     lon_span = abs(max_lon - min_lon)
     lat_span = abs(max_lat - min_lat)
     if lon_span > 1.0 or lat_span > 1.0:
-        raise ValueError(
-            "Area GPX troppo estesa per download automatico SRTM: supera 1x1 grado. "
-            "Riduci il GPX o usa un DEM manuale."
-        )
+        raise ValueError("Area troppo estesa (>1°). Riduci GPX o usa DEM manuale.")
 
     w_km = _haversine_km(min_lon, min_lat, max_lon, min_lat)
     h_km = _haversine_km(min_lon, min_lat, min_lon, max_lat)
     if max(w_km, h_km) > 200.0:
-        raise ValueError(
-            f"Area GPX troppo estesa ({w_km:.1f}x{h_km:.1f} km). Limite automatico: 200 km."
-        )
+        raise ValueError(f"Area troppo estesa ({w_km:.1f}x{h_km:.1f} km). Limite 200 km.")
 
 
-def _run_elevation_clip(
+def _try_elevation_clip(
     *,
     min_lon: float,
     min_lat: float,
@@ -43,12 +38,11 @@ def _run_elevation_clip(
     out_path: Path,
     product: str,
     timeout_s: int,
-    idle_timeout_s: int,
     env: dict[str, str],
-) -> tuple[int, str]:
+) -> tuple[bool, str]:
     """
-    Run `elevation clip` streaming output to avoid infinite hangs.
-    Returns: (returncode, combined_output)
+    Run elevation clip with a HARD timeout.
+    Returns: (success, diagnostic_output)
     """
     cmd = [
         "elevation",
@@ -62,57 +56,30 @@ def _run_elevation_clip(
         product,
     ]
 
-    start = time.time()
-    last_output = time.time()
-    lines: list[str] = []
-
     try:
-        p = subprocess.Popen(
+        res = subprocess.run(
             cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
+            capture_output=True,
             text=True,
             env=env,
+            timeout=timeout_s,
         )
-    except OSError as exc:
+        out = (res.stdout or "") + ("\n" + res.stderr if res.stderr else "")
+        ok = (res.returncode == 0) and out_path.exists() and out_path.stat().st_size > 0
+        return ok, out.strip()
+
+    except subprocess.TimeoutExpired as exc:
+        out = ""
+        if exc.stdout:
+            out += exc.stdout
+        if exc.stderr:
+            out += "\n" + exc.stderr
+        return False, f"[timeout {timeout_s}s] elevation clip product={product}\n{out.strip()}"
+
+    except FileNotFoundError as exc:
         raise RuntimeError(
-            "Comando 'elevation' non disponibile. Installa dependencies da requirements.txt"
+            "Comando 'elevation' non trovato. Assicurati che la dependency 'elevation' sia installata."
         ) from exc
-
-    assert p.stdout is not None
-
-    while True:
-        # Legge una riga se disponibile (non blocca troppo)
-        line = p.stdout.readline()
-        if line:
-            last_output = time.time()
-            lines.append(line.rstrip())
-        else:
-            # Se il processo è terminato, usciamo
-            rc = p.poll()
-            if rc is not None:
-                break
-
-            # Check idle timeout / total timeout
-            now = time.time()
-            if now - last_output > idle_timeout_s:
-                p.kill()
-                lines.append(
-                    f"[maps3d] elevation clip idle-timeout after {idle_timeout_s}s (product={product})"
-                )
-                return 124, "\n".join(lines)
-
-            if now - start > timeout_s:
-                p.kill()
-                lines.append(
-                    f"[maps3d] elevation clip total-timeout after {timeout_s}s (product={product})"
-                )
-                return 124, "\n".join(lines)
-
-            time.sleep(0.2)
-
-    output = "\n".join(lines)
-    return p.returncode or 0, output
 
 
 def download_srtm_dem_for_bbox(
@@ -121,17 +88,17 @@ def download_srtm_dem_for_bbox(
     max_lon: float,
     max_lat: float,
     out_tif_path: str | Path,
-    timeout_s: int = 420,
-    idle_timeout_s: int = 45,
-    retries: int = 1,
+    timeout_s: int = 90,
+    retries: int = 2,
 ) -> Path:
     """
     Download+clip SRTM DEM for bbox using `elevation clip`.
 
-    Improvements vs previous version:
-    - streaming output (no silent hangs)
-    - idle-timeout (abort if no output for a while)
-    - retry + fallback product (SRTM1 -> SRTM3)
+    Robust behavior:
+    - HARD timeout per attempt (default 90s)
+    - retry
+    - fallback SRTM1 -> SRTM3
+    - clean partial outputs
     """
     _validate_area(min_lon, min_lat, max_lon, max_lat)
 
@@ -143,48 +110,46 @@ def download_srtm_dem_for_bbox(
     cache_dir.mkdir(parents=True, exist_ok=True)
     env["ELEVATION_DATA"] = str(cache_dir)
 
-    # Se esiste già ed è non vuoto, riusa
+    # reuse if already exists
     if out_path.exists() and out_path.stat().st_size > 0:
         return out_path
 
-    # Proviamo in ordine: SRTM1 (retry), poi fallback SRTM3
-    products = ["SRTM1"] * (retries + 1) + ["SRTM3"]
+    attempts: list[tuple[str, int]] = []
+    # SRTM1 attempts then fallback to SRTM3
+    for _ in range(retries + 1):
+        attempts.append(("SRTM1", timeout_s))
+    attempts.append(("SRTM3", max(timeout_s, 120)))
 
-    last_output = ""
-    last_rc = 1
-
-    for product in products:
-        rc, out_text = _run_elevation_clip(
-            min_lon=min_lon,
-            min_lat=min_lat,
-            max_lon=max_lon,
-            max_lat=max_lat,
-            out_path=out_path,
-            product=product,
-            timeout_s=timeout_s,
-            idle_timeout_s=idle_timeout_s,
-            env=env,
-        )
-        last_rc = rc
-        last_output = out_text
-
-        if rc == 0 and out_path.exists() and out_path.stat().st_size > 0:
-            return out_path
-
-        # pulizia file vuoti/rotti prima di retry
+    last_diag = ""
+    for product, to_s in attempts:
+        # cleanup broken file
         if out_path.exists() and out_path.stat().st_size == 0:
             try:
                 out_path.unlink()
             except OSError:
                 pass
 
-    # Se arriviamo qui: fallito
-    msg = (
+        ok, diag = _try_elevation_clip(
+            min_lon=min_lon,
+            min_lat=min_lat,
+            max_lon=max_lon,
+            max_lat=max_lat,
+            out_path=out_path,
+            product=product,
+            timeout_s=to_s,
+            env=env,
+        )
+        last_diag = diag
+
+        if ok:
+            return out_path
+
+        # small backoff before retry
+        time.sleep(1.0)
+
+    raise RuntimeError(
         "Download DEM SRTM fallito.\n"
         f"bbox=[{min_lon:.4f},{min_lat:.4f},{max_lon:.4f},{max_lat:.4f}]\n"
         f"output atteso: {out_path}\n"
-        f"returncode: {last_rc}\n"
-        "output:\n"
-        f"{last_output.strip()}"
+        f"diagnostica:\n{last_diag}"
     )
-    raise RuntimeError(msg)
