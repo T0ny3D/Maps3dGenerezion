@@ -49,4 +49,5 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: dist/Maps3DGen.exe
-          tag_name: ${{ github.ref_name }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
