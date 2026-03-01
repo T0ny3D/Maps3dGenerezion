@@ -1,4 +1,4 @@
-    name: Build Windows EXE and publish Release
+name: Build Windows EXE and publish Release
 
 on:
   push:
