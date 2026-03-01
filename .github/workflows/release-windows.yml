@@ -31,7 +31,7 @@ jobs:
       - name: Build EXE (PyInstaller)
         shell: pwsh
         run: |
-          pyinstaller --onefile --windowed --name Maps3DGen maps3d_app/__main__.py
+          pyinstaller --onefile --windowed --name Maps3DGen launcher.py
           if (!(Test-Path "dist\Maps3DGen.exe")) { throw "EXE not found in dist\Maps3DGen.exe" }
 
       - name: Upload EXE to GitHub Release
