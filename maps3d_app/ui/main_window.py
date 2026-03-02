@@ -39,6 +39,7 @@ PRINTER_PROFILE_TO_VALUES = {"bambu": (0.22, 0.9), "voron": (0.28, 1.0)}
 class Worker(QObject):
     finished = Signal(object)
     failed = Signal(str)
+    log = Signal(str)
 
     def __init__(self, fn, *args, **kwargs) -> None:
         super().__init__()
@@ -422,7 +423,7 @@ class MainWindow(QMainWindow):
 
         self._append_log("Blender non rilevato automaticamente. Usa 'Sfoglia' per selezionarlo.")
 
-    def _run_background(self, fn, on_done, what: str) -> None:
+    def _run_background(self, fn, on_done, what: str, with_log: bool = False) -> None:
         if self._thread is not None:
             QMessageBox.warning(self, "Operazione in corso", "Attendere il completamento dell'operazione corrente.")
             return
@@ -434,6 +435,13 @@ class MainWindow(QMainWindow):
 
         self._thread = QThread(self)
         worker = Worker(fn)
+        if with_log:
+            worker.log.connect(self._append_log)
+
+            def wrapped() -> object:
+                return fn(worker.log.emit)
+
+            worker.fn = wrapped
         worker.moveToThread(self._thread)
         self._thread.started.connect(worker.run)
         worker.finished.connect(lambda data: self._on_worker_done(data, on_done, what))
@@ -467,11 +475,16 @@ class MainWindow(QMainWindow):
             return
         self.status.setText("Scarico DEM SRTM...")
 
-        def task():
+        def task(log):
+            log("Calcolo bbox GPX...")
             min_lon, min_lat, max_lon, max_lat = compute_gpx_bbox_lonlat(gpx, margin_ratio=0.20)
+            log(f"bbox=[{min_lon:.4f},{min_lat:.4f},{max_lon:.4f},{max_lat:.4f}]")
             out_dem = default_dem_output_path_for_gpx(gpx)
+            log(f"Output DEM: {out_dem}")
             try:
-                return download_srtm_dem_for_bbox(min_lon, min_lat, max_lon, max_lat, out_dem)
+                return download_srtm_dem_for_bbox(
+                    min_lon, min_lat, max_lon, max_lat, out_dem, log=log
+                )
             except Exception as exc:  # noqa: BLE001
                 raise RuntimeError(
                     f"Download DEM fallito.\n"
@@ -485,7 +498,7 @@ class MainWindow(QMainWindow):
             self.status.setText("Download DEM completato")
             QMessageBox.information(self, "DEM scaricato", f"DEM salvato in:\n{path}")
 
-        self._run_background(task, done, "download DEM")
+        self._run_background(task, done, "download DEM", with_log=True)
 
     def _on_test_mode_toggled(self, enabled: bool) -> None:
         if enabled:
