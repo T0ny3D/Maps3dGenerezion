@@ -49,6 +49,8 @@ class Worker(QObject):
 
     def run(self) -> None:
         try:
+            self.log.emit("[worker] start")  # DEBUG
+
             # Se il task accetta un logger (log), lo passiamo.
             # Se non lo accetta, ripieghiamo sulla chiamata normale.
             try:
@@ -218,7 +220,6 @@ class MainWindow(QMainWindow):
         container = QWidget()
         l = QVBoxLayout(container)
 
-        # Input section
         files = QGroupBox("Input")
         f = QFormLayout(files)
 
@@ -257,7 +258,6 @@ class MainWindow(QMainWindow):
         f.addRow("Blender.exe:", blender_row)
         l.addWidget(files)
 
-        # Parameters section
         params = QGroupBox("Parametri")
         p = QFormLayout(params)
         p.addRow("Dimensione X (mm):", self.size_x)
@@ -268,7 +268,6 @@ class MainWindow(QMainWindow):
         p.addRow("Rilievo stimato:", self.relief_estimate)
         l.addWidget(params)
 
-        # Frame section
         frame = QGroupBox("Cornice / Incastro")
         fr = QFormLayout(frame)
         fr.addRow("Cornice separata:", self.separate_frame)
@@ -286,7 +285,6 @@ class MainWindow(QMainWindow):
         fr.addRow("", self.test_mode_info)
         l.addWidget(frame)
 
-        # AMS and track section
         ams = QGroupBox("AMS + Traccia")
         a = QFormLayout(ams)
         a.addRow("AMS 4 colori:", self.ams_enabled)
@@ -299,7 +297,6 @@ class MainWindow(QMainWindow):
         a.addRow("track_top_radius_mm:", self.track_top_radius_mm)
         l.addWidget(ams)
 
-        # Text section
         text = QGroupBox("Testi")
         t = QFormLayout(text)
         t.addRow("Titolo:", self.title_text)
@@ -331,7 +328,7 @@ class MainWindow(QMainWindow):
         toggles.addWidget(self.show_track)
         toggles.addStretch(1)
 
-        r.addLayout(toggles)
+        r.addLayout(togles)
         r.addWidget(self.preview, 7)
         r.addWidget(self.log, 3)
 
@@ -357,20 +354,15 @@ class MainWindow(QMainWindow):
         self.gpx_path.setText(path)
         self.download_dem_btn.setEnabled(True)
 
-        # Default output dir = folder del GPX (solo se non impostato)
         if not self.out_dir.text().strip():
             self.out_dir.setText(str(Path(path).parent))
 
-        # Log bbox (senza contare punti)
         try:
             min_lon, min_lat, max_lon, max_lat = compute_gpx_bbox_lonlat(path, margin_ratio=0.20)
-            self._append_log(
-                f"GPX caricato, bbox=[{min_lon:.4f}, {min_lat:.4f}, {max_lon:.4f}, {max_lat:.4f}]"
-            )
+            self._append_log(f"GPX caricato, bbox=[{min_lon:.4f}, {min_lat:.4f}, {max_lon:.4f}, {max_lat:.4f}]")
         except Exception as exc:  # noqa: BLE001
             self._append_log(f"Errore lettura GPX/bbox: {exc}")
 
-        # Auto-download DEM if not set
         if not self.dem_path.text().strip():
             self._append_log("DEM non impostato: avvio download automatico...")
             self._download_dem()
@@ -388,7 +380,6 @@ class MainWindow(QMainWindow):
             self.blender_exe_path.setText(path)
 
     def _auto_detect_blender_exe(self) -> None:
-        """Auto-detect blender.exe on Windows common paths if not already set."""
         if self.blender_exe_path.text().strip():
             return
 
@@ -403,7 +394,6 @@ class MainWindow(QMainWindow):
             r"C:\Program Files\Blender Foundation\Blender\blender.exe",
             r"C:\Program Files (x86)\Blender Foundation\Blender\blender.exe",
         ]
-
         wildcard_patterns = [
             r"C:\Program Files\Blender Foundation\Blender*\blender.exe",
             r"C:\Program Files (x86)\Blender Foundation\Blender*\blender.exe",
@@ -445,7 +435,6 @@ class MainWindow(QMainWindow):
         worker = Worker(fn)
         worker.moveToThread(self._thread)
 
-        # Log live dal worker alla UI
         worker.log.connect(self._append_log)
 
         self._thread.started.connect(worker.run)
@@ -484,6 +473,7 @@ class MainWindow(QMainWindow):
         self.status.setText("Scarico DEM SRTM...")
 
         def task(log):
+            log("[download DEM] task iniziato")  # DEBUG
             min_lon, min_lat, max_lon, max_lat = compute_gpx_bbox_lonlat(gpx, margin_ratio=0.20)
             out_dem = default_dem_output_path_for_gpx(gpx)
             try:
@@ -561,7 +551,7 @@ class MainWindow(QMainWindow):
             groove_width_mm=float(self.groove_width_mm.text()),
             groove_depth_mm=float(self.groove_depth_mm.text()),
             groove_chamfer_mm=float(self.groove_chamfer_mm.text()),
-            track_clearance_mm=float(self.track_clearance_mm.text()),
+            track_clearance_mm=float(self.groove_depth_mm.text()),
             track_relief_mm=float(self.track_relief_mm.text()),
             track_top_radius_mm=float(self.track_top_radius_mm.text()),
         )
@@ -622,7 +612,6 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Input mancanti", "Seleziona sia GPX che DEM.")
             return
 
-        # output base automatico
         out_dir = Path(self.out_dir.text().strip() or Path(gpx).parent)
         out_dir.mkdir(parents=True, exist_ok=True)
         output_base = out_dir / Path(gpx).stem
