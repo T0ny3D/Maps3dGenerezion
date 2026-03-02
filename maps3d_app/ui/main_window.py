@@ -328,7 +328,7 @@ class MainWindow(QMainWindow):
         toggles.addWidget(self.show_track)
         toggles.addStretch(1)
 
-        r.addLayout(togles)
+        r.addLayout(toggles)
         r.addWidget(self.preview, 7)
         r.addWidget(self.log, 3)
 
