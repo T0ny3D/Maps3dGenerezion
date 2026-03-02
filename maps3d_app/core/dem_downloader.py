@@ -6,6 +6,9 @@ import platform
 import subprocess
 import time
 from pathlib import Path
+from typing import Callable, Optional
+
+LogFn = Optional[Callable[[str], None]]
 
 
 def _haversine_km(lon1: float, lat1: float, lon2: float, lat2: float) -> float:
@@ -107,6 +110,7 @@ def download_srtm_dem_for_bbox(
     out_tif_path: str | Path,
     timeout_s: int = 120,
     retries: int = 1,
+    log: LogFn = None,
 ) -> Path:
     """
     Download+clip SRTM DEM for bbox using `elevation clip`.
@@ -115,6 +119,7 @@ def download_srtm_dem_for_bbox(
     - HARD timeout per attempt (kills process tree on Windows)
     - retry
     - fallback SRTM1 -> SRTM3
+    - optional live logging via `log(str)`
     """
     _validate_area(min_lon, min_lat, max_lon, max_lat)
 
@@ -126,7 +131,14 @@ def download_srtm_dem_for_bbox(
     cache_dir.mkdir(parents=True, exist_ok=True)
     env["ELEVATION_DATA"] = str(cache_dir)
 
+    if log:
+        log(f"SRTM DEM: cache={cache_dir}")
+        log(f"SRTM DEM: bbox=[{min_lon:.5f},{min_lat:.5f},{max_lon:.5f},{max_lat:.5f}]")
+        log(f"SRTM DEM: output={out_path}")
+
     if out_path.exists() and out_path.stat().st_size > 0:
+        if log:
+            log("SRTM DEM: file già presente, salto download.")
         return out_path
 
     attempts: list[tuple[str, int]] = []
@@ -143,6 +155,9 @@ def download_srtm_dem_for_bbox(
             except OSError:
                 pass
 
+        if log:
+            log(f"SRTM DEM: tentativo product={product} timeout={to_s}s (cmd: elevation clip)")
+
         ok, diag = _run_elevation_clip_hard(
             min_lon=min_lon,
             min_lat=min_lat,
@@ -156,7 +171,13 @@ def download_srtm_dem_for_bbox(
         last_diag = diag
 
         if ok:
+            if log:
+                log(f"SRTM DEM: OK ({product}) -> {out_path.name}")
             return out_path
+
+        if log:
+            short = (diag[:400] + "…") if len(diag) > 400 else diag
+            log(f"SRTM DEM: fallito ({product}). {short}")
 
         time.sleep(1.0)
 
@@ -164,5 +185,6 @@ def download_srtm_dem_for_bbox(
         "Download DEM SRTM fallito.\n"
         f"bbox=[{min_lon:.4f},{min_lat:.4f},{max_lon:.4f},{max_lat:.4f}]\n"
         f"output atteso: {out_path}\n"
+        f"cache: {cache_dir}\n"
         f"diagnostica:\n{last_diag}"
     )
