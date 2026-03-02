@@ -54,19 +54,23 @@ def _run_elevation_clip_hard(
     env: dict[str, str],
 ) -> tuple[bool, str]:
     """
-    Run `elevation clip` with a HARD timeout that kills the full process tree on Windows.
+    Run `eio clip` with a HARD timeout that kills the full process tree on Windows.
     Returns (ok, diag).
     """
+    # CLI ufficiale del pacchetto elevation è: eio
+    # eio --product SRTM1 clip -o out.tif --bounds west south east north
     cmd = [
-        "elevation",
+        "eio",
+        "--product",
+        product,
         "clip",
-        f"-b={min_lon}",
+        "-o",
+        str(out_path),
+        "--bounds",
+        str(min_lon),
         str(min_lat),
         str(max_lon),
         str(max_lat),
-        f"-o={out_path}",
-        "--product",
-        product,
     ]
 
     try:
@@ -79,7 +83,7 @@ def _run_elevation_clip_hard(
         )
     except FileNotFoundError as exc:
         raise RuntimeError(
-            "Comando 'elevation' non trovato. Nella build EXE deve essere presente la dependency 'elevation'."
+            "Comando 'eio' non trovato. Nella build EXE deve essere presente il tool del pacchetto 'elevation'."
         ) from exc
 
     try:
@@ -94,7 +98,7 @@ def _run_elevation_clip_hard(
             stdout, stderr = p.communicate(timeout=10)
         except Exception:
             stdout, stderr = "", ""
-        diag = f"[timeout {timeout_s}s] elevation clip product={product}\n{stdout}\n{stderr}".strip()
+        diag = f"[timeout {timeout_s}s] eio clip product={product}\n{stdout}\n{stderr}".strip()
         return False, diag
 
     out = (stdout or "") + ("\n" + stderr if stderr else "")
@@ -113,7 +117,7 @@ def download_srtm_dem_for_bbox(
     log: LogFn = None,
 ) -> Path:
     """
-    Download+clip SRTM DEM for bbox using `elevation clip`.
+    Download+clip SRTM DEM for bbox using `eio clip`.
 
     Robust:
     - HARD timeout per attempt (kills process tree on Windows)
@@ -156,7 +160,7 @@ def download_srtm_dem_for_bbox(
                 pass
 
         if log:
-            log(f"SRTM DEM: tentativo product={product} timeout={to_s}s (cmd: elevation clip)")
+            log(f"SRTM DEM: tentativo product={product} timeout={to_s}s (cmd: eio clip)")
 
         ok, diag = _run_elevation_clip_hard(
             min_lon=min_lon,
