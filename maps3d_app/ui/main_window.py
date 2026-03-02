@@ -39,6 +39,7 @@ PRINTER_PROFILE_TO_VALUES = {"bambu": (0.22, 0.9), "voron": (0.28, 1.0)}
 class Worker(QObject):
     finished = Signal(object)
     failed = Signal(str)
+    log = Signal(str)  # log live verso UI
 
     def __init__(self, fn, *args, **kwargs) -> None:
         super().__init__()
@@ -48,7 +49,13 @@ class Worker(QObject):
 
     def run(self) -> None:
         try:
-            out = self.fn(*self.args, **self.kwargs)
+            # Se il task accetta un logger (log), lo passiamo.
+            # Se non lo accetta, ripieghiamo sulla chiamata normale.
+            try:
+                out = self.fn(self.log.emit, *self.args, **self.kwargs)
+            except TypeError:
+                out = self.fn(*self.args, **self.kwargs)
+
             self.finished.emit(out)
         except Exception as exc:  # noqa: BLE001
             self.failed.emit(str(exc))
@@ -385,9 +392,9 @@ class MainWindow(QMainWindow):
         if self.blender_exe_path.text().strip():
             return
 
+        import glob
         import os
         import platform
-        import glob
 
         if platform.system() != "Windows":
             return
@@ -422,6 +429,8 @@ class MainWindow(QMainWindow):
 
         self._append_log("Blender non rilevato automaticamente. Usa 'Sfoglia' per selezionarlo.")
 
+    # ---------- THREAD HELPERS ----------
+
     def _run_background(self, fn, on_done, what: str) -> None:
         if self._thread is not None:
             QMessageBox.warning(self, "Operazione in corso", "Attendere il completamento dell'operazione corrente.")
@@ -435,6 +444,10 @@ class MainWindow(QMainWindow):
         self._thread = QThread(self)
         worker = Worker(fn)
         worker.moveToThread(self._thread)
+
+        # Log live dal worker alla UI
+        worker.log.connect(self._append_log)
+
         self._thread.started.connect(worker.run)
         worker.finished.connect(lambda data: self._on_worker_done(data, on_done, what))
         worker.failed.connect(lambda err: self._on_worker_error(err, what))
@@ -460,18 +473,28 @@ class MainWindow(QMainWindow):
         self.status.setText("Errore")
         QMessageBox.critical(self, f"Errore {what}", err)
 
+    # ---------- ACTIONS ----------
+
     def _download_dem(self) -> None:
         gpx = self.gpx_path.text().strip()
         if not gpx:
             QMessageBox.warning(self, "GPX mancante", "Seleziona prima un GPX.")
             return
+
         self.status.setText("Scarico DEM SRTM...")
 
-        def task():
+        def task(log):
             min_lon, min_lat, max_lon, max_lat = compute_gpx_bbox_lonlat(gpx, margin_ratio=0.20)
             out_dem = default_dem_output_path_for_gpx(gpx)
             try:
-                return download_srtm_dem_for_bbox(min_lon, min_lat, max_lon, max_lat, out_dem)
+                return download_srtm_dem_for_bbox(
+                    min_lon,
+                    min_lat,
+                    max_lon,
+                    max_lat,
+                    out_dem,
+                    log=log,
+                )
             except Exception as exc:  # noqa: BLE001
                 raise RuntimeError(
                     f"Download DEM fallito.\n"
