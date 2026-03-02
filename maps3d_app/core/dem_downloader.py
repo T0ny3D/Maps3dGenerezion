@@ -19,6 +19,7 @@ from rasterio.merge import merge
 SRTM1_BASE_URL = "https://s3.amazonaws.com/elevation-tiles-prod/skadi"
 SRTM3_BASE_URL = "https://srtm.csi.cgiar.org/wp-content/uploads/files/srtm_5x5/TIFF"
 DOWNLOAD_CHUNK_SIZE = 1024 * 1024
+LOG_INTERVAL_S = 2.0
 USER_AGENT = "Maps3dGenerezion/1.0"
 
 
@@ -87,7 +88,12 @@ def _download_url(url: str, dest: Path, timeout_s: int, log: Callable[[str], Non
         req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
         with urllib.request.urlopen(req, timeout=timeout_s) as resp:
             total_header = resp.getheader("Content-Length")
-            total = int(total_header) if total_header and total_header.isdigit() else None
+            total = None
+            if total_header:
+                try:
+                    total = int(total_header)
+                except ValueError:
+                    total = None
             downloaded = 0
             last_log = time.monotonic()
             with open(tmp, "wb") as out_file:
@@ -97,7 +103,7 @@ def _download_url(url: str, dest: Path, timeout_s: int, log: Callable[[str], Non
                         break
                     out_file.write(chunk)
                     downloaded += len(chunk)
-                    if log and time.monotonic() - last_log > 2:
+                    if log is not None and time.monotonic() - last_log > LOG_INTERVAL_S:
                         if total:
                             log(
                                 f"Scaricati {downloaded / 1024 / 1024:.1f} MB di {total / 1024 / 1024:.1f} MB..."
@@ -138,7 +144,10 @@ def _extract_zip_member(src: Path, member: str, dest: Path) -> None:
 
 def _merge_tiles_to_bbox(tile_paths: list[Path], bounds: tuple[float, float, float, float], out_path: Path) -> None:
     if not tile_paths:
-        raise RuntimeError("Nessun tile DEM disponibile per il bbox richiesto.")
+        raise RuntimeError(
+            "Nessun tile DEM disponibile per il bbox richiesto "
+            "(errore download, area fuori copertura o GPX non valido)."
+        )
     datasets: list[rasterio.DatasetReader] = []
     try:
         for path in tile_paths:
@@ -180,7 +189,7 @@ def _download_srtm1_tiles(
         gz_path = tile_dir / f"{slat}{slon}.hgt.gz"
         remaining = deadline - time.monotonic()
         if remaining <= 0:
-            raise RuntimeError("Timeout download DEM (SRTM1).")
+            raise RuntimeError(f"Timeout download DEM (SRTM1) su tile {slat}{slon}.")
         _log(log, f"Download tile {slat}{slon} (SRTM1)...")
         _download_url(url, gz_path, timeout_s=max(5, int(remaining)), log=log)
         _gunzip_file(gz_path, tile_path)
@@ -202,19 +211,19 @@ def _download_srtm3_tiles(
     tiles: list[Path] = []
     tile_dir = cache_dir / "SRTM3"
     for ilon, ilat in _iter_srtm3_tiles(min_lon, min_lat, max_lon, max_lat):
-        base_name = f"srtm_{ilon:02d}_{ilat:02d}"
-        tif_path = tile_dir / f"{base_name}.tif"
+        tile_base_name = f"srtm_{ilon:02d}_{ilat:02d}"
+        tif_path = tile_dir / f"{tile_base_name}.tif"
         if tif_path.exists() and tif_path.stat().st_size > 0:
             tiles.append(tif_path)
             continue
-        zip_path = tile_dir / f"{base_name}.zip"
-        url = f"{SRTM3_BASE_URL}/{base_name}.zip"
+        zip_path = tile_dir / f"{tile_base_name}.zip"
+        url = f"{SRTM3_BASE_URL}/{tile_base_name}.zip"
         remaining = deadline - time.monotonic()
         if remaining <= 0:
-            raise RuntimeError("Timeout download DEM (SRTM3).")
-        _log(log, f"Download tile {base_name} (SRTM3)...")
+            raise RuntimeError(f"Timeout download DEM (SRTM3) su tile {tile_base_name}.")
+        _log(log, f"Download tile {tile_base_name} (SRTM3)...")
         _download_url(url, zip_path, timeout_s=max(5, int(remaining)), log=log)
-        _extract_zip_member(zip_path, f"{base_name}.tif", tif_path)
+        _extract_zip_member(zip_path, f"{tile_base_name}.tif", tif_path)
         zip_path.unlink(missing_ok=True)
         tiles.append(tif_path)
     return tiles
@@ -233,11 +242,6 @@ def _download_and_merge(
     log: Callable[[str], None] | None,
 ) -> None:
     deadline = time.monotonic() + timeout_s
-    if product == "SRTM1":
-        tiles = list(_iter_srtm1_tiles(min_lon, min_lat, max_lon, max_lat))
-    else:
-        tiles = list(_iter_srtm3_tiles(min_lon, min_lat, max_lon, max_lat))
-    _log(log, f"Prodotto {product}: {len(tiles)} tile da scaricare.")
     if product == "SRTM1":
         tile_paths = _download_srtm1_tiles(
             min_lon=min_lon,
@@ -258,6 +262,7 @@ def _download_and_merge(
             deadline=deadline,
             log=log,
         )
+    _log(log, f"Prodotto {product}: {len(tile_paths)} tile pronti.")
     _log(log, "Merge e clip DEM...")
     _merge_tiles_to_bbox(tile_paths, (min_lon, min_lat, max_lon, max_lat), out_path)
 
@@ -285,7 +290,8 @@ def download_srtm_dem_for_bbox(
     out_path = Path(out_tif_path).resolve()
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
-    cache_dir = Path(os.environ.get("ELEVATION_DATA") or out_path.parent / ".elevation_cache").resolve()
+    cache_root = os.environ.get("ELEVATION_DATA")
+    cache_dir = Path(cache_root or str(out_path.parent / ".elevation_cache")).resolve()
     cache_dir.mkdir(parents=True, exist_ok=True)
 
     if out_path.exists() and out_path.stat().st_size > 0:
@@ -297,7 +303,7 @@ def download_srtm_dem_for_bbox(
         attempts.append(("SRTM1", timeout_s))
     attempts.append(("SRTM3", max(timeout_s, 180)))
 
-    last_diag = ""
+    last_error_message = ""
     _log(
         log,
         f"Avvio download DEM bbox=[{min_lon:.4f},{min_lat:.4f},{max_lon:.4f},{max_lat:.4f}] cache={cache_dir}",
@@ -324,9 +330,11 @@ def download_srtm_dem_for_bbox(
             if out_path.exists() and out_path.stat().st_size > 0:
                 _log(log, f"DEM pronto in {time.monotonic() - attempt_start:.1f}s.")
                 return out_path
-            raise RuntimeError("DEM generato vuoto.")
+            raise RuntimeError(
+                "DEM generato vuoto (output creato senza dati: verifica rasterio o filesystem)."
+            )
         except Exception as exc:  # noqa: BLE001
-            last_diag = str(exc)
+            last_error_message = str(exc)
             _log(log, f"Tentativo {product} fallito: {exc}")
             time.sleep(1.0)
 
@@ -334,5 +342,5 @@ def download_srtm_dem_for_bbox(
         "Download DEM SRTM fallito.\n"
         f"bbox=[{min_lon:.4f},{min_lat:.4f},{max_lon:.4f},{max_lat:.4f}]\n"
         f"output atteso: {out_path}\n"
-        f"diagnostica:\n{last_diag}"
+        f"diagnostica:\n{last_error_message}"
     )

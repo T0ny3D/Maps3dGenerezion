@@ -41,15 +41,19 @@ class Worker(QObject):
     failed = Signal(str)
     log = Signal(str)
 
-    def __init__(self, fn, *args, **kwargs) -> None:
+    def __init__(self, fn, *args, log_enabled: bool = False, **kwargs) -> None:
         super().__init__()
         self.fn = fn
         self.args = args
         self.kwargs = kwargs
+        self.log_enabled = log_enabled
 
     def run(self) -> None:
         try:
-            out = self.fn(*self.args, **self.kwargs)
+            if self.log_enabled:
+                out = self.fn(*self.args, log=self.log.emit, **self.kwargs)
+            else:
+                out = self.fn(*self.args, **self.kwargs)
             self.finished.emit(out)
         except Exception as exc:  # noqa: BLE001
             self.failed.emit(str(exc))
@@ -434,14 +438,9 @@ class MainWindow(QMainWindow):
         self._append_log(f"[{what}] avvio...")
 
         self._thread = QThread(self)
-        worker = Worker(fn)
+        worker = Worker(fn, log_enabled=with_log)
         if with_log:
             worker.log.connect(self._append_log)
-
-            def wrapped() -> object:
-                return fn(worker.log.emit)
-
-            worker.fn = wrapped
         worker.moveToThread(self._thread)
         self._thread.started.connect(worker.run)
         worker.finished.connect(lambda data: self._on_worker_done(data, on_done, what))
