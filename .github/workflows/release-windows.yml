@@ -35,6 +35,7 @@ jobs:
             --collect-all rasterio `
             --collect-all pyproj `
             --collect-all shapely `
+            --collect-all elevation `
             launcher.py
 
           if (!(Test-Path "dist\Maps3DGen.exe")) { throw "EXE not found in dist\Maps3DGen.exe" }
