@@ -66,7 +66,15 @@ class Worker(QObject):
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
-        self.setWindowTitle("GPX to 3D STL / 3MF")
+
+        # --- BUILD FINGERPRINT (DEBUG) ---
+        import time as _time
+
+        self.setWindowTitle(f"GPX to 3D STL / 3MF - {_time.strftime('%H:%M:%S')}")
+        # N.B. _append_log usa self.log, quindi lo chiameremo appena creato il widget log
+        self._build_stamp = _time.strftime("%Y-%m-%d %H:%M:%S")
+        # -------------------------------
+
         self.setMinimumSize(1280, 820)
         self.setMinimumWidth(760)
 
@@ -203,6 +211,9 @@ class MainWindow(QMainWindow):
         self._build_ui()
         self._apply_printer_profile_defaults()
         self._auto_detect_blender_exe()
+
+        # Ora che self.log esiste, possiamo loggare il fingerprint
+        self._append_log(f"[BUILD] {self._build_stamp}")
 
     def _build_ui(self) -> None:
         root = QWidget()
@@ -430,6 +441,7 @@ class MainWindow(QMainWindow):
         self.generate_btn.setEnabled(False)
         self.download_dem_btn.setEnabled(False)
         self._append_log(f"[{what}] avvio...")
+        self._append_log("[thread] setup worker")  # DEBUG
 
         self._thread = QThread(self)
         worker = Worker(fn)
@@ -437,7 +449,9 @@ class MainWindow(QMainWindow):
 
         worker.log.connect(self._append_log)
 
+        self._thread.started.connect(lambda: self._append_log("[thread] QThread started"))  # DEBUG
         self._thread.started.connect(worker.run)
+
         worker.finished.connect(lambda data: self._on_worker_done(data, on_done, what))
         worker.failed.connect(lambda err: self._on_worker_error(err, what))
         worker.finished.connect(self._thread.quit)
@@ -551,7 +565,7 @@ class MainWindow(QMainWindow):
             groove_width_mm=float(self.groove_width_mm.text()),
             groove_depth_mm=float(self.groove_depth_mm.text()),
             groove_chamfer_mm=float(self.groove_chamfer_mm.text()),
-            track_clearance_mm=float(self.groove_depth_mm.text()),
+            track_clearance_mm=float(self.track_clearance_mm.text()),
             track_relief_mm=float(self.track_relief_mm.text()),
             track_top_radius_mm=float(self.track_top_radius_mm.text()),
         )
