@@ -50,14 +50,10 @@ class Worker(QObject):
     def run(self) -> None:
         try:
             self.log.emit("[worker] start")  # DEBUG
-
-            # Se il task accetta un logger (log), lo passiamo.
-            # Se non lo accetta, ripieghiamo sulla chiamata normale.
             try:
                 out = self.fn(self.log.emit, *self.args, **self.kwargs)
             except TypeError:
                 out = self.fn(*self.args, **self.kwargs)
-
             self.finished.emit(out)
         except Exception as exc:  # noqa: BLE001
             self.failed.emit(str(exc))
@@ -67,18 +63,15 @@ class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
 
-        # --- BUILD FINGERPRINT (DEBUG) ---
         import time as _time
 
-        self.setWindowTitle(f"GPX to 3D STL / 3MF - {_time.strftime('%H:%M:%S')}")
-        # N.B. _append_log usa self.log, quindi lo chiameremo appena creato il widget log
         self._build_stamp = _time.strftime("%Y-%m-%d %H:%M:%S")
-        # -------------------------------
-
+        self.setWindowTitle(f"GPX to 3D STL / 3MF - {_time.strftime('%H:%M:%S')}")
         self.setMinimumSize(1280, 820)
         self.setMinimumWidth(760)
 
         self._thread: QThread | None = None
+        self._worker: Worker | None = None
         self._last_output_base: Path | None = None
 
         # Input path widgets
@@ -212,7 +205,6 @@ class MainWindow(QMainWindow):
         self._apply_printer_profile_defaults()
         self._auto_detect_blender_exe()
 
-        # Ora che self.log esiste, possiamo loggare il fingerprint
         self._append_log(f"[BUILD] {self._build_stamp}")
 
     def _build_ui(self) -> None:
@@ -444,24 +436,29 @@ class MainWindow(QMainWindow):
         self._append_log("[thread] setup worker")  # DEBUG
 
         self._thread = QThread(self)
-        worker = Worker(fn)
-        worker.moveToThread(self._thread)
 
-        worker.log.connect(self._append_log)
+        # IMPORTANTISSIMO: mantieni un riferimento, altrimenti il worker può sparire
+        self._worker = Worker(fn)
+        self._worker.moveToThread(self._thread)
+
+        self._worker.log.connect(self._append_log)
 
         self._thread.started.connect(lambda: self._append_log("[thread] QThread started"))  # DEBUG
-        self._thread.started.connect(worker.run)
+        self._thread.started.connect(self._worker.run)
 
-        worker.finished.connect(lambda data: self._on_worker_done(data, on_done, what))
-        worker.failed.connect(lambda err: self._on_worker_error(err, what))
-        worker.finished.connect(self._thread.quit)
-        worker.failed.connect(self._thread.quit)
-        self._thread.finished.connect(worker.deleteLater)
+        self._worker.finished.connect(lambda data: self._on_worker_done(data, on_done, what))
+        self._worker.failed.connect(lambda err: self._on_worker_error(err, what))
+        self._worker.finished.connect(self._thread.quit)
+        self._worker.failed.connect(self._thread.quit)
+
+        self._thread.finished.connect(self._worker.deleteLater)
         self._thread.finished.connect(self._cleanup_thread)
+
         self._thread.start()
 
     def _cleanup_thread(self) -> None:
         self._thread = None
+        self._worker = None
         self.progress.setRange(0, 100)
         self.progress.setValue(100)
         self.generate_btn.setEnabled(True)
@@ -490,22 +487,14 @@ class MainWindow(QMainWindow):
             log("[download DEM] task iniziato")  # DEBUG
             min_lon, min_lat, max_lon, max_lat = compute_gpx_bbox_lonlat(gpx, margin_ratio=0.20)
             out_dem = default_dem_output_path_for_gpx(gpx)
-            try:
-                return download_srtm_dem_for_bbox(
-                    min_lon,
-                    min_lat,
-                    max_lon,
-                    max_lat,
-                    out_dem,
-                    log=log,
-                )
-            except Exception as exc:  # noqa: BLE001
-                raise RuntimeError(
-                    f"Download DEM fallito.\n"
-                    f"bbox=[{min_lon:.4f},{min_lat:.4f},{max_lon:.4f},{max_lat:.4f}]\n"
-                    f"output atteso: {out_dem}\n"
-                    f"Dettaglio: {exc}"
-                ) from exc
+            return download_srtm_dem_for_bbox(
+                min_lon,
+                min_lat,
+                max_lon,
+                max_lat,
+                out_dem,
+                log=log,
+            )
 
         def done(path: Path) -> None:
             self.dem_path.setText(str(path))
@@ -668,17 +657,14 @@ class MainWindow(QMainWindow):
         export_3mf_enabled = self.export_3mf.isChecked()
 
         def task() -> tuple[Path, Path | None, str | None]:
-            try:
-                run_pipeline(
-                    gpx_path=gpx,
-                    dem_path=dem,
-                    stl_output_path=output_path,
-                    config=config,
-                    backend=backend_value,
-                    blender_exe_path=blender_path,
-                )
-            except Exception as exc:  # noqa: BLE001
-                raise RuntimeError(f"Errore pipeline [{backend_value}]: {exc}") from exc
+            run_pipeline(
+                gpx_path=gpx,
+                dem_path=dem,
+                stl_output_path=output_path,
+                config=config,
+                backend=backend_value,
+                blender_exe_path=blender_path,
+            )
 
             out_base = Path(output_path)
 
