@@ -78,6 +78,8 @@ class MainWindow(QMainWindow):
         self.gpx_path = QLineEdit()
         self.dem_path = QLineEdit()
         self.blender_exe_path = QLineEdit()
+        self.opentopo_key = QLineEdit()
+        self.opentopo_key.setPlaceholderText("OpenTopography API key (solo per download DEM)")
 
         # Output folder (zero-manual)
         self.out_dir = QLineEdit()
@@ -252,6 +254,7 @@ class MainWindow(QMainWindow):
 
         f.addRow("GPX:", gpx_row)
         f.addRow("DEM:", dem_row)
+        f.addRow("OpenTopo key:", self.opentopo_key)
         f.addRow("", self.download_dem_btn)
         f.addRow("Output:", out_row)
         f.addRow("Backend:", self.backend)
@@ -487,13 +490,13 @@ class MainWindow(QMainWindow):
             log("[download DEM] task iniziato")  # DEBUG
             min_lon, min_lat, max_lon, max_lat = compute_gpx_bbox_lonlat(gpx, margin_ratio=0.20)
             out_dem = default_dem_output_path_for_gpx(gpx)
+            key = self.opentopo_key.text().strip() or None
             return download_srtm_dem_for_bbox(
-                min_lon,
-                min_lat,
-                max_lon,
-                max_lat,
+                min_lon, min_lat, max_lon, max_lat,
                 out_dem,
                 log=log,
+                api_key=key,
+                demtype="SRTMGL1",  # 30m
             )
 
         def done(path: Path) -> None:
