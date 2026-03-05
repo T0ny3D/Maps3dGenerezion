@@ -79,7 +79,6 @@ class MainWindow(QMainWindow):
         self.dem_path = QLineEdit()
         self.blender_exe_path = QLineEdit()
         self.opentopo_key = QLineEdit()
-        from PySide6.QtWidgets import QLineEdit  # già c'è
         self.opentopo_key.setEchoMode(QLineEdit.Password)
         self.opentopo_key.setPlaceholderText("OpenTopography API key (solo per download DEM)")
 
