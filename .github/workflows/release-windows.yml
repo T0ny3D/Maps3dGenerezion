@@ -68,6 +68,7 @@ jobs:
         run: |
           pyinstaller --noconfirm --onefile --windowed --name Maps3DGen `
             launcher.py `
+            --collect-submodules maps3d_app `
             --hidden-import maps3d_app.core.blender_backend `
             --collect-all rasterio `
             --collect-all pyproj `
