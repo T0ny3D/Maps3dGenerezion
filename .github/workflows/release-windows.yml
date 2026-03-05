@@ -35,7 +35,7 @@ jobs:
             --collect-all rasterio `
             --collect-all pyproj `
             --collect-all shapely `
-            --add-data "maps3d_app/engine/blender_script.py;maps3d_app/engine" `
+            --add-data "maps3d_app/engine/blender_script.py;maps3d_app/engine"
             launcher.py
 
           if (!(Test-Path "dist\Maps3DGen.exe")) { throw "EXE not found in dist\Maps3DGen.exe" }
