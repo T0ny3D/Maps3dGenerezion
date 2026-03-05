@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 import json
 import os
 from pathlib import Path
@@ -46,8 +47,9 @@ def _compute_dem_metrics(gpx_path: str | Path, dem_path: str | Path, params: Gen
         data = ds.read(1, window=window, masked=True)
         if data.size == 0:
             raise ValueError("Ritaglio DEM vuoto: controlla GPX e DEM.")
-
-        dem = np.asarray(data.filled(np.nan), dtype=np.float64)
+        
+        # ✅ fix: converti a float PRIMA di filled(np.nan)
+        dem = np.asarray(data.astype(np.float64).filled(np.nan), dtype=np.float64)
         valid_mask = ~np.asarray(data.mask) if np.ma.isMaskedArray(data) else np.isfinite(dem)
         valid_mask &= np.isfinite(dem)
         if not np.any(valid_mask):
@@ -210,20 +212,41 @@ def _prepare_job_assets(gpx_path: str | Path, dem_path: str | Path, out_stl_path
     return job_dir, job_json_path
 
 
-def run_blender_pipeline(gpx_path: str | Path, dem_path: str | Path, out_stl_path: str | Path, params: GenerateConfig, blender_exe_path: str | None = None) -> None:
+def run_blender_pipeline(
+    gpx_path: str | Path,
+    dem_path: str | Path,
+    out_stl_path: str | Path,
+    params: GenerateConfig,
+    blender_exe_path: str | None = None,
+) -> None:
     blender_exe = blender_exe_path or _autodetect_blender_exe()
     if not blender_exe:
         raise ValueError("Blender non trovato. Specifica il percorso di blender.exe nella UI.")
 
-    blender_script = Path(__file__).resolve().parent.parent / "engine" / "blender_script.py"
+    # ✅ PyInstaller-friendly: in EXE lo script vive sotto sys._MEIPASS
+    base_dir = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent.parent.parent))
+    blender_script = base_dir / "maps3d_app" / "engine" / "blender_script.py"
     if not blender_script.exists():
         raise FileNotFoundError(f"Script Blender non trovato: {blender_script}")
 
     job_dir, job_json = _prepare_job_assets(gpx_path, dem_path, out_stl_path, params)
-    cmd = [str(blender_exe), "--background", "--factory-startup", "--python", str(blender_script), "--", str(job_json)]
+
+    cmd = [
+        str(blender_exe),
+        "--background",
+        "--factory-startup",
+        "--python",
+        str(blender_script),
+        "--",
+        str(job_json),
+    ]
     result = subprocess.run(cmd, capture_output=True, text=True)
+
     if result.returncode != 0:
         raise RuntimeError(
             "Blender pipeline fallita.\n"
-            f"Comando: {' '.join(cmd)}\nSTDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}\nJob dir: {job_dir}"
+            f"Comando: {' '.join(cmd)}\n"
+            f"STDOUT:\n{result.stdout}\n"
+            f"STDERR:\n{result.stderr}\n"
+            f"Job dir: {job_dir}"
         )
