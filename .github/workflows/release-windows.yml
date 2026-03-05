@@ -4,6 +4,12 @@ on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: "Tag da usare per la release (es: v0.1.0). Se vuoto, usa il commit corrente."
+        required: false
+        default: ""
 
 permissions:
   contents: write
@@ -46,9 +52,36 @@ jobs:
           name: Maps3DGen-Windows
           path: dist/Maps3DGen.exe
 
+      - name: Determine release tag
+        id: rel
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          if ("${{ github.event_name }}" -eq "workflow_dispatch") {
+            if ("${{ inputs.tag_name }}" -ne "") {
+              $tag = "${{ inputs.tag_name }}"
+            } else {
+              # fallback: usa un tag "manual-YYYYMMDD-HHMMSS"
+              $tag = "manual-$((Get-Date).ToString('yyyyMMdd-HHmmss'))"
+            }
+          }
+          "tag=$tag" >> $env:GITHUB_OUTPUT
+
+      - name: Create GitHub Release (if missing)
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $tag = "${{ steps.rel.outputs.tag }}"
+          gh release view $tag 2>$null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $tag --title $tag --notes "Automated build"
+          }
+
       - name: Upload EXE to GitHub Release (gh cli)
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release upload ${{ github.ref_name }} dist/Maps3DGen.exe --clobber
+          $tag = "${{ steps.rel.outputs.tag }}"
+          gh release upload $tag dist/Maps3DGen.exe --clobber
