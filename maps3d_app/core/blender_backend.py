@@ -282,8 +282,14 @@ def run_blender_pipeline(
         raise FileNotFoundError(f"Script Blender non trovato: {blender_script}")
 
     job_dir, job_json = _prepare_job_assets(gpx_path, dem_path, out_stl_path, params)
-
+    
     log_file = Path(job_dir) / "blender_run.log"
+
+    # DEBUG: così lo vedi nel log della UI
+    print(f"[blender] Job dir: {job_dir}")
+    print(f"[blender] Job json: {job_json}")
+    print(f"[blender] Blender log: {log_file}"
+
     cmd = [
         str(blender_exe),
         "--background",
