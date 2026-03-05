@@ -31,13 +31,12 @@ jobs:
       - name: Build EXE (PyInstaller)
         shell: pwsh
         run: |
-          pyinstaller --onefile --windowed --name Maps3DGen `
-            launcher.py  
+          pyinstaller --noconfirm --onefile --windowed --name Maps3DGen `
+            launcher.py `
             --collect-all rasterio `
             --collect-all pyproj `
             --collect-all shapely `
             --add-data "maps3d_app/engine/blender_script.py;maps3d_app/engine"
-            
 
           if (!(Test-Path "dist\Maps3DGen.exe")) { throw "EXE not found in dist\Maps3DGen.exe" }
 
