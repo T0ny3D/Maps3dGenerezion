@@ -42,10 +42,9 @@ def _download_url_to_file(url: str, out_path: Path, timeout_s: int, log: LogFn =
 
     with urllib.request.urlopen(req, timeout=timeout_s) as resp:
         ctype = (resp.headers.get("Content-Type") or "").lower()
-        # Leggiamo i primi bytes per capire se è JSON errore
-        first = resp.read(1)
-        rest = resp.read(4095)
-        head = first + rest
+
+        # Leggiamo un piccolo header per capire se è JSON errore
+        head = resp.read(4096)
 
         # Se sembra JSON, leggiamo tutto e alziamo errore
         if "application/json" in ctype or (head[:1] == b"{" and b"}" in head):
@@ -53,9 +52,9 @@ def _download_url_to_file(url: str, out_path: Path, timeout_s: int, log: LogFn =
             data = head + tail
             try:
                 msg = json.loads(data.decode("utf-8", errors="ignore"))
-        except Exception:
+            except Exception:
                 msg = data.decode("utf-8", errors="ignore")
-        raise RuntimeError(f"OpenTopo error: {msg}")
+            raise RuntimeError(f"OpenTopo error: {msg}")
 
         # Altrimenti scriviamo a chunk su file
         with out_path.open("wb") as f:
@@ -65,6 +64,7 @@ def _download_url_to_file(url: str, out_path: Path, timeout_s: int, log: LogFn =
                 if not chunk:
                     break
                 f.write(chunk)
+
 
 def download_srtm_dem_for_bbox(
     min_lon: float,
@@ -86,7 +86,6 @@ def download_srtm_dem_for_bbox(
       - SRTMGL1 (SRTM 30m)
       - SRTMGL3 (SRTM 90m)
       - COP90 (Copernicus 90m)
-      - ALOS (se disponibile via OpenTopo)
 
     Serve API key: la passi con api_key=... oppure via env OPENTOPO_API_KEY.
     """
@@ -111,7 +110,6 @@ def download_srtm_dem_for_bbox(
         log(f"OpenTopo: bbox=[{min_lon:.5f},{min_lat:.5f},{max_lon:.5f},{max_lat:.5f}]")
         log(f"OpenTopo: output={out_path.name}")
 
-    # Endpoint ufficiale “globaldem”
     params = {
         "demtype": demtype,
         "south": str(min_lat),
@@ -130,11 +128,11 @@ def download_srtm_dem_for_bbox(
         try:
             if log:
                 log(f"OpenTopo: download tentativo {attempt+1}/{retries+1} (timeout={timeout_s}s)")
-            if tmp.exists():
-                try:
-                    tmp.unlink()
-                except Exception:
-                    pass
+
+            try:
+                tmp.unlink(missing_ok=True)
+            except Exception:
+                pass
 
             _download_url_to_file(url, tmp, timeout_s=timeout_s, log=log)
 
