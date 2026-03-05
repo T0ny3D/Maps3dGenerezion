@@ -103,7 +103,6 @@ def _compute_dem_metrics(
     horiz_scale_mm_per_unit = min(params.model_width_mm / dx, params.model_height_mm / dy)
     z_range_mm = (z_max_src - z_min_src) * horiz_scale_mm_per_unit
 
-    # NB: manteniamo la signature com’era
     return (
         normalized01,
         track_xy_mm,
@@ -119,7 +118,10 @@ def _compute_dem_metrics(
 
 def _fetch_osm_layers(points_lonlat: np.ndarray, model_w: float, model_h: float) -> dict[str, list[list[list[float]]]]:
     min_lon, min_lat = np.min(points_lonlat[:, 0]), np.min(points_lonlat[:, 1])
-    max_lon, max_lat = np.max(points_lonlat[:, 0]), np.max(points_lonlat[:, 1])
+    max_lon, max_lat = np.min(points_lonlat[:, 0]), np.max(points_lonlat[:, 1])  # safe
+    max_lon = float(np.max(points_lonlat[:, 0]))
+    max_lat = float(np.max(points_lonlat[:, 1]))
+
     pad_lon = (max_lon - min_lon) * 0.12 + 1e-4
     pad_lat = (max_lat - min_lat) * 0.12 + 1e-4
     s, w, n, e = min_lat - pad_lat, min_lon - pad_lon, max_lat + pad_lat, max_lon + pad_lon
@@ -274,7 +276,6 @@ def run_blender_pipeline(
     if not blender_exe:
         raise ValueError("Blender non trovato. Specifica il percorso di blender.exe nella UI.")
 
-    # ✅ PyInstaller-friendly: in EXE lo script vive sotto sys._MEIPASS
     base_dir = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent.parent.parent))
     blender_script = base_dir / "maps3d_app" / "engine" / "blender_script.py"
     if not blender_script.exists():
@@ -282,10 +283,15 @@ def run_blender_pipeline(
 
     job_dir, job_json = _prepare_job_assets(gpx_path, dem_path, out_stl_path, params)
 
+    log_file = Path(job_dir) / "blender_run.log"
     cmd = [
         str(blender_exe),
         "--background",
         "--factory-startup",
+        "--log-file",
+        str(log_file),
+        "--log-level",
+        "2",
         "--python",
         str(blender_script),
         "--",
@@ -294,17 +300,17 @@ def run_blender_pipeline(
 
     result = subprocess.run(cmd, capture_output=True, text=True)
 
-    # 1) Blender ha fallito davvero
     if result.returncode != 0:
         raise RuntimeError(
             "Blender pipeline fallita.\n"
             f"Comando: {' '.join(cmd)}\n"
             f"STDOUT:\n{result.stdout}\n"
             f"STDERR:\n{result.stderr}\n"
-            f"Job dir: {job_dir}"
+            f"Job dir: {job_dir}\n"
+            f"Blender log file: {log_file}"
         )
 
-    # 2) Blender ha finito ma non ha scritto gli STL attesi
+    # verifica output STL
     base_out = Path(out_stl_path).resolve()
     suffix = "test_" if params.test_mode else ""
     expected = [
@@ -328,4 +334,5 @@ def run_blender_pipeline(
             + "\n\nSTDERR:\n"
             + (result.stderr or "")
             + f"\n\nJob dir: {job_dir}"
+            + f"\nBlender log file: {log_file}"
         )
