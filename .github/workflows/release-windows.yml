@@ -4,10 +4,12 @@ on:
   push:
     tags:
       - "v*"
+  release:
+    types: [published]
   workflow_dispatch:
     inputs:
       tag_name:
-        description: "Tag da usare per la release (es: v0.1.0). Se vuoto, usa il commit corrente."
+        description: "Tag della release (es: v0.1.0). Se vuoto: usa il tag dell'evento o crea manual-..."
         required: false
         default: ""
 
@@ -21,6 +23,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -33,6 +37,31 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install pyinstaller
+
+      - name: Determine release tag
+        id: rel
+        shell: pwsh
+        run: |
+          $tag = ""
+
+          if ("${{ github.event_name }}" -eq "push") {
+            $tag = "${{ github.ref_name }}"
+          }
+          elseif ("${{ github.event_name }}" -eq "release") {
+            $tag = "${{ github.event.release.tag_name }}"
+          }
+          elseif ("${{ github.event_name }}" -eq "workflow_dispatch") {
+            if ("${{ inputs.tag_name }}" -ne "") {
+              $tag = "${{ inputs.tag_name }}"
+            } else {
+              $tag = "manual-$((Get-Date).ToString('yyyyMMdd-HHmmss'))"
+            }
+          }
+
+          if ($tag -eq "") { throw "Tag non determinato (evento: ${{ github.event_name }})" }
+
+          "tag=$tag" >> $env:GITHUB_OUTPUT
+          Write-Host "Using tag: $tag"
 
       - name: Build EXE (PyInstaller)
         shell: pwsh
@@ -51,21 +80,6 @@ jobs:
         with:
           name: Maps3DGen-Windows
           path: dist/Maps3DGen.exe
-
-      - name: Determine release tag
-        id: rel
-        shell: pwsh
-        run: |
-          $tag = "${{ github.ref_name }}"
-          if ("${{ github.event_name }}" -eq "workflow_dispatch") {
-            if ("${{ inputs.tag_name }}" -ne "") {
-              $tag = "${{ inputs.tag_name }}"
-            } else {
-              # fallback: usa un tag "manual-YYYYMMDD-HHMMSS"
-              $tag = "manual-$((Get-Date).ToString('yyyyMMdd-HHmmss'))"
-            }
-          }
-          "tag=$tag" >> $env:GITHUB_OUTPUT
 
       - name: Create GitHub Release (if missing)
         shell: pwsh
