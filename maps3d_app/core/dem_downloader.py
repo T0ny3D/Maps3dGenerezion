@@ -42,18 +42,29 @@ def _download_url_to_file(url: str, out_path: Path, timeout_s: int, log: LogFn =
 
     with urllib.request.urlopen(req, timeout=timeout_s) as resp:
         ctype = (resp.headers.get("Content-Type") or "").lower()
-        data = resp.read()
+        # Leggiamo i primi bytes per capire se è JSON errore
+        first = resp.read(1)
+        rest = resp.read(4095)
+        head = first + rest
 
-    # OpenTopography in caso di errore spesso ritorna JSON
-    if "application/json" in ctype or (data[:1] == b"{" and data[-1:] in (b"}", b"\n")):
-        try:
-            msg = json.loads(data.decode("utf-8", errors="ignore"))
+        # Se sembra JSON, leggiamo tutto e alziamo errore
+        if "application/json" in ctype or (head[:1] == b"{" and b"}" in head):
+            tail = resp.read()
+            data = head + tail
+            try:
+                msg = json.loads(data.decode("utf-8", errors="ignore"))
         except Exception:
-            msg = data.decode("utf-8", errors="ignore")
+                msg = data.decode("utf-8", errors="ignore")
         raise RuntimeError(f"OpenTopo error: {msg}")
 
-    out_path.write_bytes(data)
-
+        # Altrimenti scriviamo a chunk su file
+        with out_path.open("wb") as f:
+            f.write(head)
+            while True:
+                chunk = resp.read(1024 * 1024)  # 1MB
+                if not chunk:
+                    break
+                f.write(chunk)
 
 def download_srtm_dem_for_bbox(
     min_lon: float,
