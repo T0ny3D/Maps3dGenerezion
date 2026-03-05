@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-import sys
 import json
 import os
-from pathlib import Path
 import shutil
 import subprocess
+import sys
 import tempfile
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode
 from urllib.request import urlopen
@@ -32,7 +32,21 @@ def _autodetect_blender_exe() -> str | None:
     return shutil.which("blender")
 
 
-def _compute_dem_metrics(gpx_path: str | Path, dem_path: str | Path, params: GenerateConfig) -> tuple[np.ndarray, np.ndarray, float, float, float, float, float, tuple[float, float, float, float], tuple[int, int]]:
+def _compute_dem_metrics(
+    gpx_path: str | Path,
+    dem_path: str | Path,
+    params: GenerateConfig,
+) -> tuple[
+    np.ndarray,
+    np.ndarray,
+    float,
+    float,
+    float,
+    float,
+    float,
+    tuple[float, float, float, float],
+    tuple[int, int],
+]:
     points_lonlat = load_gpx_points(gpx_path)
     with rasterio.open(dem_path) as ds:
         if ds.crs is None:
@@ -42,14 +56,19 @@ def _compute_dem_metrics(gpx_path: str | Path, dem_path: str | Path, params: Gen
         points_dem = np.column_stack((x_dem, y_dem))
 
         minx, miny, maxx, maxy = _compute_bbox(points_dem, params.bbox_margin_ratio)
-        window = rasterio.windows.from_bounds(minx, miny, maxx, maxy, transform=ds.transform).round_offsets().round_lengths()
+        window = (
+            rasterio.windows.from_bounds(minx, miny, maxx, maxy, transform=ds.transform)
+            .round_offsets()
+            .round_lengths()
+        )
 
         data = ds.read(1, window=window, masked=True)
         if data.size == 0:
             raise ValueError("Ritaglio DEM vuoto: controlla GPX e DEM.")
-        
+
         # ✅ fix: converti a float PRIMA di filled(np.nan)
         dem = np.asarray(data.astype(np.float64).filled(np.nan), dtype=np.float64)
+
         valid_mask = ~np.asarray(data.mask) if np.ma.isMaskedArray(data) else np.isfinite(dem)
         valid_mask &= np.isfinite(dem)
         if not np.any(valid_mask):
@@ -59,7 +78,11 @@ def _compute_dem_metrics(gpx_path: str | Path, dem_path: str | Path, params: Gen
         z_max_src = float(np.max(dem[valid_mask]))
         dem_filled = np.where(valid_mask, dem, z_min_src)
         z_range_src = max(z_max_src - z_min_src, 0.0)
-        normalized01 = np.zeros_like(dem_filled, dtype=np.float64) if z_range_src <= 1e-12 else np.clip((dem_filled - z_min_src) / z_range_src, 0.0, 1.0)
+        normalized01 = (
+            np.zeros_like(dem_filled, dtype=np.float64)
+            if z_range_src <= 1e-12
+            else np.clip((dem_filled - z_min_src) / z_range_src, 0.0, 1.0)
+        )
 
         rows, cols = dem_filled.shape
         win_t = ds.window_transform(window)
@@ -79,7 +102,19 @@ def _compute_dem_metrics(gpx_path: str | Path, dem_path: str | Path, params: Gen
 
     horiz_scale_mm_per_unit = min(params.model_width_mm / dx, params.model_height_mm / dy)
     z_range_mm = (z_max_src - z_min_src) * horiz_scale_mm_per_unit
-    return normalized01, track_xy_mm, 0.0, z_range_mm, z_range_mm, dx, dy, (x_min, y_min, x_max, y_max), (1 if x_max >= x_min else -1, 1 if y_max >= y_min else -1)
+
+    # NB: manteniamo la signature com’era
+    return (
+        normalized01,
+        track_xy_mm,
+        0.0,
+        z_range_mm,
+        z_range_mm,
+        dx,
+        dy,
+        (x_min, y_min, x_max, y_max),
+        (1 if x_max >= x_min else -1, 1 if y_max >= y_min else -1),
+    )
 
 
 def _fetch_osm_layers(points_lonlat: np.ndarray, model_w: float, model_h: float) -> dict[str, list[list[list[float]]]]:
@@ -92,11 +127,11 @@ def _fetch_osm_layers(points_lonlat: np.ndarray, model_w: float, model_h: float)
     q = f"""
 [out:json][timeout:25];
 (
-  way[\"natural\"=\"water\"]({s},{w},{n},{e});
-  way[\"waterway\"]({s},{w},{n},{e});
-  way[\"landuse\"~\"forest|meadow|grass\"]({s},{w},{n},{e});
-  way[\"leisure\"~\"park|garden\"]({s},{w},{n},{e});
-  way[\"highway\"~\"motorway|trunk|primary\"]({s},{w},{n},{e});
+  way["natural"="water"]({s},{w},{n},{e});
+  way["waterway"]({s},{w},{n},{e});
+  way["landuse"~"forest|meadow|grass"]({s},{w},{n},{e});
+  way["leisure"~"park|garden"]({s},{w},{n},{e});
+  way["highway"~"motorway|trunk|primary"]({s},{w},{n},{e});
 );
 out geom;
 """
@@ -130,8 +165,15 @@ def estimate_relief_mm(gpx_path: str | Path, dem_path: str | Path, params: Gener
     return float(z_range_mm * params.vertical_scale)
 
 
-def _prepare_job_assets(gpx_path: str | Path, dem_path: str | Path, out_stl_path: str | Path, params: GenerateConfig) -> tuple[Path, Path]:
-    normalized01, track_xy_mm, z_min_mm, z_max_mm, z_range_mm, _, _, _, _ = _compute_dem_metrics(gpx_path, dem_path, params)
+def _prepare_job_assets(
+    gpx_path: str | Path,
+    dem_path: str | Path,
+    out_stl_path: str | Path,
+    params: GenerateConfig,
+) -> tuple[Path, Path]:
+    normalized01, track_xy_mm, z_min_mm, z_max_mm, z_range_mm, _, _, _, _ = _compute_dem_metrics(
+        gpx_path, dem_path, params
+    )
     points_lonlat = load_gpx_points(gpx_path)
     osm_layers = _fetch_osm_layers(points_lonlat, params.model_width_mm, params.model_height_mm)
 
@@ -150,7 +192,15 @@ def _prepare_job_assets(gpx_path: str | Path, dem_path: str | Path, out_stl_path
     out_track_inlay_stl_path = str(base_out.with_name(f"{base_out.stem}_{suffix}track_inlay_red.stl").resolve())
 
     heightmap_u16 = np.round(normalized01 * 65535.0).astype(np.uint16)
-    with rasterio.open(heightmap_path, "w", driver="GTiff", height=heightmap_u16.shape[0], width=heightmap_u16.shape[1], count=1, dtype="uint16") as out_ds:
+    with rasterio.open(
+        heightmap_path,
+        "w",
+        driver="GTiff",
+        height=heightmap_u16.shape[0],
+        width=heightmap_u16.shape[1],
+        count=1,
+        dtype="uint16",
+    ) as out_ds:
         out_ds.write(heightmap_u16, 1)
 
     job: dict[str, Any] = {
@@ -208,6 +258,7 @@ def _prepare_job_assets(gpx_path: str | Path, dem_path: str | Path, out_stl_path
         "osm_green_lines_mm": osm_layers.get("green", []),
         "osm_detail_lines_mm": osm_layers.get("detail", []),
     }
+
     job_json_path.write_text(json.dumps(job, indent=2), encoding="utf-8")
     return job_dir, job_json_path
 
@@ -240,8 +291,10 @@ def run_blender_pipeline(
         "--",
         str(job_json),
     ]
+
     result = subprocess.run(cmd, capture_output=True, text=True)
 
+    # 1) Blender ha fallito davvero
     if result.returncode != 0:
         raise RuntimeError(
             "Blender pipeline fallita.\n"
@@ -249,4 +302,30 @@ def run_blender_pipeline(
             f"STDOUT:\n{result.stdout}\n"
             f"STDERR:\n{result.stderr}\n"
             f"Job dir: {job_dir}"
+        )
+
+    # 2) Blender ha finito ma non ha scritto gli STL attesi
+    base_out = Path(out_stl_path).resolve()
+    suffix = "test_" if params.test_mode else ""
+    expected = [
+        base_out.with_name(f"{base_out.stem}_{suffix}base_brown.stl"),
+        base_out.with_name(f"{base_out.stem}_{suffix}water.stl"),
+        base_out.with_name(f"{base_out.stem}_{suffix}green.stl"),
+        base_out.with_name(f"{base_out.stem}_{suffix}detail.stl"),
+        base_out.with_name(f"{base_out.stem}_{suffix}track_inlay_red.stl"),
+    ]
+    if params.separate_frame:
+        expected.append(base_out.with_name(f"{base_out.stem}_{suffix}frame.stl"))
+
+    missing = [p for p in expected if (not p.exists()) or p.stat().st_size == 0]
+    if missing:
+        raise RuntimeError(
+            "Blender ha terminato senza errori ma NON ha generato gli STL attesi.\n"
+            "File mancanti/vuoti:\n"
+            + "\n".join(f"- {p}" for p in missing)
+            + "\n\nSTDOUT:\n"
+            + (result.stdout or "")
+            + "\n\nSTDERR:\n"
+            + (result.stderr or "")
+            + f"\n\nJob dir: {job_dir}"
         )
