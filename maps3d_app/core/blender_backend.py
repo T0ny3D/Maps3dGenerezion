@@ -41,6 +41,24 @@ def _resolve_blender_script_path() -> Path:
     raise FileNotFoundError(f"Script Blender non trovato. Percorsi controllati:\n{searched}")
 
 
+codex/fix-windows-build-issues-with-stl-and-3mf-rqih8u
+def _tail_text(text: str | None, lines: int = 40) -> str:
+    if not text:
+        return "<vuoto>"
+    rows = text.rstrip().splitlines()
+    return "\n".join(rows[-lines:])
+
+
+def _append_run_log(log_path: Path, content: str) -> None:
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    with log_path.open("a", encoding="utf-8", errors="replace") as fh:
+        fh.write(content)
+        if not content.endswith("\n"):
+            fh.write("\n")
+
+
+
+main
 def _autodetect_blender_exe() -> str | None:
     if os.name == "nt":
         roots = [Path("C:/Program Files/Blender Foundation"), Path("C:/Program Files (x86)/Blender Foundation")]
@@ -296,35 +314,74 @@ def run_blender_pipeline(
     blender_script = _resolve_blender_script_path()
 
     job_dir, job_json = _prepare_job_assets(gpx_path, dem_path, out_stl_path, params)
-    
-    log_file = Path(job_dir) / "blender_run.log"
+
+    job_log_file = Path(job_dir) / "blender_run.log"
+    output_log_file = Path(out_stl_path).resolve().parent / "blender_run.log"
 
     # DEBUG: così lo vedi nel log della UI
     print(f"[blender] Job dir: {job_dir}")
     print(f"[blender] Job json: {job_json}")
+    codex/fix-windows-build-issues-with-stl-and-3mf-rqih8u
+    print(f"[blender] Blender script: {blender_script}")
+    print(f"[blender] Blender log (job): {job_log_file}")
+    print(f"[blender] Blender log (output): {output_log_file}")
+
+    if not job_json.exists():
+        raise RuntimeError(f"Job JSON non creato: {job_json}")
     print(f"[blender] Blender log: {log_file}")
+    main
 
     cmd = [
         str(blender_exe),
         "--background",
         "--factory-startup",
-        "--python-exit-code", "1",   # <- IMPORTANTISSIMO
-        "--log-file", str(log_file),
+        "--python-exit-code", "1",
+        "--log-file", str(job_log_file),
         "--log-level", "2",
         "--python", str(blender_script),
         "--", str(job_json),
     ]
 
+    command_str = " ".join(cmd)
+    _append_run_log(
+        output_log_file,
+        "\n".join([
+            "=== Blender run ===",
+            f"command: {command_str}",
+            f"blender_script: {blender_script}",
+            f"job_json: {job_json}",
+            f"job_log: {job_log_file}",
+        ]),
+    )
+
     result = subprocess.run(cmd, capture_output=True, text=True)
+
+    stdout_tail = _tail_text(result.stdout)
+    stderr_tail = _tail_text(result.stderr)
+    _append_run_log(
+        output_log_file,
+        "\n".join([
+            f"returncode: {result.returncode}",
+            "--- STDOUT (tail) ---",
+            stdout_tail,
+            "--- STDERR (tail) ---",
+            stderr_tail,
+            f"job_log_file: {job_log_file}",
+            "=== End Blender run ===",
+        ]),
+    )
 
     if result.returncode != 0:
         raise RuntimeError(
             "Blender pipeline fallita.\n"
-            f"Comando: {' '.join(cmd)}\n"
-            f"STDOUT:\n{result.stdout}\n"
-            f"STDERR:\n{result.stderr}\n"
-            f"Job dir: {job_dir}\n"
-            f"Blender log file: {log_file}"
+            f"Comando: {command_str}\n"
+            f"Script Blender: {blender_script}\n"
+            f"Job JSON: {job_json}\n"
+            f"Return code: {result.returncode}\n"
+            f"STDOUT (ultime righe):\n{stdout_tail}\n"
+            f"STDERR (ultime righe):\n{stderr_tail}\n"
+            f"Log salvato: {output_log_file}\n"
+            f"Log Blender (--log-file): {job_log_file}"
         )
 
     # verifica output STL
@@ -346,10 +403,15 @@ def run_blender_pipeline(
             "Blender ha terminato senza errori ma NON ha generato gli STL attesi.\n"
             "File mancanti/vuoti:\n"
             + "\n".join(f"- {p}" for p in missing)
-            + "\n\nSTDOUT:\n"
-            + (result.stdout or "")
-            + "\n\nSTDERR:\n"
-            + (result.stderr or "")
+            + "\n\nComando: " + command_str
+            + "\nScript Blender: " + str(blender_script)
+            + "\nJob JSON: " + str(job_json)
+            + "\nReturn code: " + str(result.returncode)
+            + "\n\nSTDOUT (ultime righe):\n"
+            + stdout_tail
+            + "\n\nSTDERR (ultime righe):\n"
+            + stderr_tail
             + f"\n\nJob dir: {job_dir}"
-            + f"\nBlender log file: {log_file}"
+            + f"\nLog salvato: {output_log_file}"
+            + f"\nLog Blender (--log-file): {job_log_file}"
         )

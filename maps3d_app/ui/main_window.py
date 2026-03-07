@@ -475,7 +475,13 @@ class MainWindow(QMainWindow):
     def _on_worker_error(self, err: str, what: str) -> None:
         self._append_log(f"[{what}] errore: {err}")
         self.status.setText("Errore")
-        QMessageBox.critical(self, f"Errore {what}", err)
+        msg = QMessageBox(self)
+        msg.setIcon(QMessageBox.Icon.Critical)
+        msg.setWindowTitle(f"Errore {what}")
+        msg.setText(f"Errore durante {what}.")
+        msg.setInformativeText(err.splitlines()[0] if err else "Errore sconosciuto")
+        msg.setDetailedText(err)
+        msg.exec()
 
     # ---------- ACTIONS ----------
 
