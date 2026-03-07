@@ -84,6 +84,11 @@ jobs:
           $archive = pyi-archive_viewer -r dist\Maps3DGen_NEW.exe | Out-String
           $archive | Out-File -FilePath dist\pyi-archive.txt -Encoding utf8
 
+ codex/fix-windows-build-issues-with-stl-and-3mf-n7e9c8
+          $backendPatterns = @(
+            "maps3d_app\.core\.blender_backend",
+            "maps3d_app/core/blender_backend.pyc",
+            "maps3d_app\core\blender_backend.pyc",
  codex/fix-windows-build-issues-with-stl-and-3mf-vf8pht
  codex/fix-windows-build-issues-with-stl-and-3mf-vf8pht
 
@@ -92,10 +97,16 @@ jobs:
             "maps3d_app.core.blender_backend",
             "maps3d_app/core/blender_backend.pyc",
             "maps3d_app\\core\\blender_backend.pyc",
+ main
             "blender_backend"
           )
           $scriptPatterns = @(
             "maps3d_app/engine/blender_script.py",
+ codex/fix-windows-build-issues-with-stl-and-3mf-n7e9c8
+            "maps3d_app\engine\blender_script.py",
+            "blender_script.py",
+            "blender_script"
+
             "maps3d_app\\engine\\blender_script.py",
             "blender_script.py",
             "blender_script"
@@ -115,11 +126,16 @@ jobs:
             'blender_script.py',
             'blender_script'
  main
+ main
           )
 
           $hasBackend = $false
           foreach ($p in $backendPatterns) {
+ codex/fix-windows-build-issues-with-stl-and-3mf-n7e9c8
+            if ($archive -match $p) {
+
             if ($archive -match [regex]::Escape($p)) {
+ main
               Write-Host "Matched backend pattern: $p"
               $hasBackend = $true
               break
@@ -136,6 +152,11 @@ jobs:
           }
 
           if (-not $hasBackend -or -not $hasScript) {
+ codex/fix-windows-build-issues-with-stl-and-3mf-n7e9c8
+            Write-Host "--- Candidate lines (blender_backend|blender_script|maps3d_app|PYZ) ---"
+            $archive -split "`r?`n" |
+              Select-String -Pattern "blender_backend|blender_script|maps3d_app|PYZ" |
+
  codex/fix-windows-build-issues-with-stl-and-3mf-dsfco0
             Write-Host "--- Candidate lines (blender_backend|blender_script|maps3d_app|PYZ) ---"
             $archive -split "`r?`n" |
@@ -144,6 +165,7 @@ jobs:
             Write-Host '--- Candidate lines (blender_backend|blender_script|maps3d_app|PYZ) ---'
             $archive -split "`r?`n" |
               Select-String -Pattern 'blender_backend|blender_script|maps3d_app|PYZ' |
+ main
  main
               ForEach-Object { Write-Host $_.Line }
           }
@@ -154,6 +176,8 @@ jobs:
 
           if (-not $hasScript) {
             throw "PyInstaller payload missing blender script (checked: $($scriptPatterns -join ', '))"
+ codex/fix-windows-build-issues-with-stl-and-3mf-n7e9c8
+
  codex/fix-windows-build-issues-with-stl-and-3mf-vf8pht
  codex/fix-windows-build-issues-with-stl-and-3mf-vf8pht
 
@@ -167,6 +191,7 @@ jobs:
 
           if ($archive -notmatch "blender_script.py") {
             throw "PyInstaller payload missing blender_script.py"
+ main
  main
  main
           }
