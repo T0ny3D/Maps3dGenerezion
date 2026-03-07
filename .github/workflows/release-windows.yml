@@ -84,6 +84,7 @@ jobs:
           $archive = pyi-archive_viewer -r dist\Maps3DGen_NEW.exe | Out-String
           $archive | Out-File -FilePath dist\pyi-archive.txt -Encoding utf8
 
+ codex/fix-windows-build-issues-with-stl-and-3mf-srts32
           $backendPatterns = @(
             'maps3d_app.core.blender_backend',
             'maps3d_app/core/blender_backend.pyc',
@@ -128,6 +129,14 @@ jobs:
 
           if (-not $hasScript) {
             throw "PyInstaller payload missing blender script (checked: $($scriptPatterns -join ', '))"
+
+          if ($archive -notmatch "maps3d_app.core.blender_backend") {
+            throw "PyInstaller payload missing maps3d_app.core.blender_backend"
+          }
+
+          if ($archive -notmatch "blender_script.py") {
+            throw "PyInstaller payload missing blender_script.py"
+ main
           }
 
       - name: Upload EXE as workflow artifact
