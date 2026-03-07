@@ -84,6 +84,9 @@ jobs:
           $archive = pyi-archive_viewer -r dist\Maps3DGen_NEW.exe | Out-String
           $archive | Out-File -FilePath dist\pyi-archive.txt -Encoding utf8
 
+ codex/fix-windows-build-issues-with-stl-and-3mf-vf8pht
+ codex/fix-windows-build-issues-with-stl-and-3mf-vf8pht
+
  codex/fix-windows-build-issues-with-stl-and-3mf-dsfco0
           $backendPatterns = @(
             "maps3d_app.core.blender_backend",
@@ -96,8 +99,10 @@ jobs:
             "maps3d_app\\engine\\blender_script.py",
             "blender_script.py",
             "blender_script"
+ main
 
  codex/fix-windows-build-issues-with-stl-and-3mf-srts32
+ main
           $backendPatterns = @(
             'maps3d_app.core.blender_backend',
             'maps3d_app/core/blender_backend.pyc',
@@ -149,7 +154,11 @@ jobs:
 
           if (-not $hasScript) {
             throw "PyInstaller payload missing blender script (checked: $($scriptPatterns -join ', '))"
+ codex/fix-windows-build-issues-with-stl-and-3mf-vf8pht
+ codex/fix-windows-build-issues-with-stl-and-3mf-vf8pht
+
  codex/fix-windows-build-issues-with-stl-and-3mf-dsfco0
+ main
 
 
           if ($archive -notmatch "maps3d_app.core.blender_backend") {
