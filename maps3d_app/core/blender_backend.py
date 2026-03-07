@@ -41,6 +41,7 @@ def _resolve_blender_script_path() -> Path:
     raise FileNotFoundError(f"Script Blender non trovato. Percorsi controllati:\n{searched}")
 
 
+codex/fix-windows-build-issues-with-stl-and-3mf-rqih8u
 def _tail_text(text: str | None, lines: int = 40) -> str:
     if not text:
         return "<vuoto>"
@@ -56,6 +57,8 @@ def _append_run_log(log_path: Path, content: str) -> None:
             fh.write("\n")
 
 
+
+main
 def _autodetect_blender_exe() -> str | None:
     if os.name == "nt":
         roots = [Path("C:/Program Files/Blender Foundation"), Path("C:/Program Files (x86)/Blender Foundation")]
@@ -318,12 +321,15 @@ def run_blender_pipeline(
     # DEBUG: così lo vedi nel log della UI
     print(f"[blender] Job dir: {job_dir}")
     print(f"[blender] Job json: {job_json}")
+    codex/fix-windows-build-issues-with-stl-and-3mf-rqih8u
     print(f"[blender] Blender script: {blender_script}")
     print(f"[blender] Blender log (job): {job_log_file}")
     print(f"[blender] Blender log (output): {output_log_file}")
 
     if not job_json.exists():
         raise RuntimeError(f"Job JSON non creato: {job_json}")
+    print(f"[blender] Blender log: {log_file}")
+    main
 
     cmd = [
         str(blender_exe),
