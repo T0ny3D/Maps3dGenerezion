@@ -22,7 +22,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ..core.blender_backend import estimate_relief_mm
+from ..core.pipeline import estimate_relief_mm
 from ..core.dem_downloader import download_srtm_dem_for_bbox
 from ..core.pipeline import (
     GenerateConfig,
