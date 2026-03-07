@@ -63,6 +63,22 @@ jobs:
           "tag=$tag" >> $env:GITHUB_OUTPUT
           Write-Host "Using tag: $tag"
 
+      - name: Pre-build diagnostics (core module presence)
+        shell: pwsh
+        run: |
+          Write-Host "Listing maps3d_app\core"
+          Get-ChildItem -Force maps3d_app\core | Format-Table -AutoSize
+
+          Write-Host "--- maps3d_app\core\__init__.py ---"
+          if (Test-Path "maps3d_app\core\__init__.py") {
+            Get-Content "maps3d_app\core\__init__.py"
+          } else {
+            Write-Host "__init__.py not found"
+          }
+
+          Write-Host "Test-Path maps3d_app\core\blender_backend.py"
+          Test-Path "maps3d_app\core\blender_backend.py"
+
       - name: Build EXE (PyInstaller)
         shell: pwsh
         run: |
@@ -70,6 +86,7 @@ jobs:
             --paths . `
             launcher.py `
             --collect-submodules maps3d_app `
+            --collect-submodules maps3d_app.core `
             --hidden-import maps3d_app.core.blender_backend `
             --collect-all rasterio `
             --collect-all pyproj `
@@ -77,6 +94,58 @@ jobs:
             --add-data "maps3d_app/engine/blender_script.py;maps3d_app/engine"
 
           if (!(Test-Path "dist\Maps3DGen_NEW.exe")) { throw "EXE not found in dist\Maps3DGen_NEW.exe" }
+
+      - name: Smoke check PyInstaller payload (backend Blender + script)
+        shell: pwsh
+        run: |
+          $archive = pyi-archive_viewer -r dist\Maps3DGen_NEW.exe | Out-String
+          $archive | Out-File -FilePath dist\pyi-archive.txt -Encoding utf8
+
+          $backendPatterns = @(
+            "maps3d_app\.core\.blender_backend",
+            "maps3d_app/core/blender_backend.pyc",
+            "maps3d_app\core\blender_backend.pyc",
+            "blender_backend"
+          )
+          $scriptPatterns = @(
+            "maps3d_app/engine/blender_script.py",
+            "maps3d_app\engine\blender_script.py",
+            "blender_script.py",
+            "blender_script"
+          )
+
+          $hasBackend = $false
+          foreach ($p in $backendPatterns) {
+            if ($archive -match $p) {
+              Write-Host "Matched backend pattern: $p"
+              $hasBackend = $true
+              break
+            }
+          }
+
+          $hasScript = $false
+          foreach ($p in $scriptPatterns) {
+            if ($archive -match [regex]::Escape($p)) {
+              Write-Host "Matched script pattern: $p"
+              $hasScript = $true
+              break
+            }
+          }
+
+          if (-not $hasBackend -or -not $hasScript) {
+            Write-Host "--- Candidate lines (blender_backend|blender_script|maps3d_app|PYZ) ---"
+            $archive -split "`r?`n" |
+              Select-String -Pattern "blender_backend|blender_script|maps3d_app|PYZ" |
+              ForEach-Object { Write-Host $_.Line }
+          }
+
+          if (-not $hasBackend) {
+            throw "PyInstaller payload missing blender backend (checked: $($backendPatterns -join ', '))"
+          }
+
+          if (-not $hasScript) {
+            throw "PyInstaller payload missing blender script (checked: $($scriptPatterns -join ', '))"
+          }
 
       - name: Upload EXE as workflow artifact
         uses: actions/upload-artifact@v4
