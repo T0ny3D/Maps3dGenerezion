@@ -18,7 +18,7 @@ permissions:
 
 jobs:
   build-windows:
-    runs-on: windows-latest
+    runs-on: windows-2022
 
     steps:
       - name: Checkout
@@ -66,7 +66,8 @@ jobs:
       - name: Build EXE (PyInstaller)
         shell: pwsh
         run: |
-          pyinstaller --noconfirm --onefile --windowed --name Maps3DGen `
+          pyinstaller --noconfirm --onefile --windowed --name Maps3DGen_NEW `
+            --paths . `
             launcher.py `
             --collect-submodules maps3d_app `
             --hidden-import maps3d_app.core.blender_backend `
@@ -75,13 +76,13 @@ jobs:
             --collect-all shapely `
             --add-data "maps3d_app/engine/blender_script.py;maps3d_app/engine"
 
-          if (!(Test-Path "dist\Maps3DGen.exe")) { throw "EXE not found in dist\Maps3DGen.exe" }
+          if (!(Test-Path "dist\Maps3DGen_NEW.exe")) { throw "EXE not found in dist\Maps3DGen_NEW.exe" }
 
       - name: Upload EXE as workflow artifact
         uses: actions/upload-artifact@v4
         with:
           name: Maps3DGen-Windows
-          path: dist/Maps3DGen.exe
+          path: dist/Maps3DGen_NEW.exe
 
       - name: Create GitHub Release (if missing)
         shell: pwsh
@@ -100,4 +101,4 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           $tag = "${{ steps.rel.outputs.tag }}"
-          gh release upload $tag dist/Maps3DGen.exe --clobber
+          gh release upload $tag dist/Maps3DGen_NEW.exe --clobber
