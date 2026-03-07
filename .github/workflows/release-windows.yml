@@ -78,6 +78,20 @@ jobs:
 
           if (!(Test-Path "dist\Maps3DGen_NEW.exe")) { throw "EXE not found in dist\Maps3DGen_NEW.exe" }
 
+      - name: Smoke check PyInstaller payload (backend Blender + script)
+        shell: pwsh
+        run: |
+          $archive = pyi-archive_viewer -r dist\Maps3DGen_NEW.exe | Out-String
+          $archive | Out-File -FilePath dist\pyi-archive.txt -Encoding utf8
+
+          if ($archive -notmatch "maps3d_app.core.blender_backend") {
+            throw "PyInstaller payload missing maps3d_app.core.blender_backend"
+          }
+
+          if ($archive -notmatch "blender_script.py") {
+            throw "PyInstaller payload missing blender_script.py"
+          }
+
       - name: Upload EXE as workflow artifact
         uses: actions/upload-artifact@v4
         with:
