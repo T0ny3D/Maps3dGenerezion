@@ -84,21 +84,15 @@ jobs:
           name: Maps3DGen-Windows
           path: dist/Maps3DGen_NEW.exe
 
-      - name: Create GitHub Release (if missing)
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          $tag = "${{ steps.rel.outputs.tag }}"
-          gh release view $tag 2>$null
-          if ($LASTEXITCODE -ne 0) {
-            gh release create $tag --title $tag --notes "Automated build"
-          }
-
-      - name: Upload EXE to GitHub Release (gh cli)
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          $tag = "${{ steps.rel.outputs.tag }}"
-          gh release upload $tag dist/Maps3DGen_NEW.exe --clobber
+      - name: Publish EXE to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.rel.outputs.tag }}
+          name: ${{ steps.rel.outputs.tag }}
+          body: Automated build
+          draft: false
+          prerelease: false
+          files: dist/Maps3DGen_NEW.exe
+          fail_on_unmatched_files: true
+          generate_release_notes: true
+          make_latest: true
