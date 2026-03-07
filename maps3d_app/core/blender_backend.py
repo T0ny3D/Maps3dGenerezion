@@ -360,6 +360,10 @@ def run_blender_pipeline(
     job_dir, job_json = _prepare_job_assets(gpx_path, dem_path, out_stl_path, params)
 
  codex/fix-windows-build-issues-with-stl-and-3mf-vf8pht
+ codex/fix-windows-build-issues-with-stl-and-3mf-vf8pht
+
+ codex/fix-windows-build-issues-with-stl-and-3mf-dsfco0
+ main
     model_relief_mm = estimate_relief_mm(gpx_path, dem_path, params)
     max_model_span_mm = max(float(params.model_width_mm), float(params.model_height_mm), 1.0)
     if model_relief_mm > max_model_span_mm * 5.0:
@@ -379,6 +383,10 @@ def run_blender_pipeline(
     print(f"[blender] Job dir: {job_dir}")
     print(f"[blender] Job json: {job_json}")
  codex/fix-windows-build-issues-with-stl-and-3mf-vf8pht
+ codex/fix-windows-build-issues-with-stl-and-3mf-vf8pht
+
+ codex/fix-windows-build-issues-with-stl-and-3mf-dsfco0
+ main
 
  codex/fix-windows-build-issues-with-stl-and-3mf-srts32
 
@@ -392,6 +400,10 @@ def run_blender_pipeline(
     if not job_json.exists():
         raise RuntimeError(f"Job JSON non creato: {job_json}")
  codex/fix-windows-build-issues-with-stl-and-3mf-vf8pht
+ codex/fix-windows-build-issues-with-stl-and-3mf-vf8pht
+
+ codex/fix-windows-build-issues-with-stl-and-3mf-dsfco0
+ main
 
  codex/fix-windows-build-issues-with-stl-and-3mf-srts32
 

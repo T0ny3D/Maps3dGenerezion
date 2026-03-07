@@ -85,6 +85,21 @@ jobs:
           $archive | Out-File -FilePath dist\pyi-archive.txt -Encoding utf8
 
  codex/fix-windows-build-issues-with-stl-and-3mf-vf8pht
+ codex/fix-windows-build-issues-with-stl-and-3mf-vf8pht
+
+ codex/fix-windows-build-issues-with-stl-and-3mf-dsfco0
+          $backendPatterns = @(
+            "maps3d_app.core.blender_backend",
+            "maps3d_app/core/blender_backend.pyc",
+            "maps3d_app\\core\\blender_backend.pyc",
+            "blender_backend"
+          )
+          $scriptPatterns = @(
+            "maps3d_app/engine/blender_script.py",
+            "maps3d_app\\engine\\blender_script.py",
+            "blender_script.py",
+            "blender_script"
+ main
 
  codex/fix-windows-build-issues-with-stl-and-3mf-srts32
  main
@@ -99,6 +114,7 @@ jobs:
             'maps3d_app\engine\blender_script.py',
             'blender_script.py',
             'blender_script'
+ main
           )
 
           $hasBackend = $false
@@ -120,9 +136,15 @@ jobs:
           }
 
           if (-not $hasBackend -or -not $hasScript) {
+ codex/fix-windows-build-issues-with-stl-and-3mf-dsfco0
+            Write-Host "--- Candidate lines (blender_backend|blender_script|maps3d_app|PYZ) ---"
+            $archive -split "`r?`n" |
+              Select-String -Pattern "blender_backend|blender_script|maps3d_app|PYZ" |
+
             Write-Host '--- Candidate lines (blender_backend|blender_script|maps3d_app|PYZ) ---'
             $archive -split "`r?`n" |
               Select-String -Pattern 'blender_backend|blender_script|maps3d_app|PYZ' |
+ main
               ForEach-Object { Write-Host $_.Line }
           }
 
@@ -133,6 +155,10 @@ jobs:
           if (-not $hasScript) {
             throw "PyInstaller payload missing blender script (checked: $($scriptPatterns -join ', '))"
  codex/fix-windows-build-issues-with-stl-and-3mf-vf8pht
+ codex/fix-windows-build-issues-with-stl-and-3mf-vf8pht
+
+ codex/fix-windows-build-issues-with-stl-and-3mf-dsfco0
+ main
 
 
           if ($archive -notmatch "maps3d_app.core.blender_backend") {
