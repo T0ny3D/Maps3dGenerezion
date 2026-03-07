@@ -186,3 +186,39 @@ def default_dem_output_path_for_gpx(gpx_path: str | Path) -> Path:
     gpx = Path(gpx_path)
     return gpx.parent / "output" / "dem_srtm.tif"
 
+
+def estimate_relief_mm(gpx_path: str | Path, dem_path: str | Path, params: GenerateConfig) -> float:
+    points_lonlat = load_gpx_points(gpx_path)
+    with rasterio.open(dem_path) as ds:
+        if ds.crs is None:
+            raise ValueError("Il DEM non ha CRS definito.")
+
+        to_dem = Transformer.from_crs("EPSG:4326", ds.crs, always_xy=True)
+        x_dem, y_dem = to_dem.transform(points_lonlat[:, 0], points_lonlat[:, 1])
+        points_dem = np.column_stack((x_dem, y_dem))
+
+        minx, miny, maxx, maxy = _compute_bbox(points_dem, params.bbox_margin_ratio)
+        window = rasterio.windows.from_bounds(minx, miny, maxx, maxy, transform=ds.transform)
+        window = window.round_offsets().round_lengths()
+
+        data = ds.read(1, window=window, masked=True)
+        if data.size == 0:
+            raise ValueError("Ritaglio DEM vuoto: controlla GPX e DEM.")
+
+        dem = np.asarray(data.astype(np.float64).filled(np.nan), dtype=np.float64)
+        finite = np.isfinite(dem)
+        if not np.any(finite):
+            raise ValueError("Ritaglio DEM privo di valori validi.")
+
+        z_min = float(np.nanmin(dem))
+        z_max = float(np.nanmax(dem))
+
+        win_t = ds.window_transform(window)
+        rows, cols = dem.shape
+        x_coords = win_t.c + (np.arange(cols) + 0.5) * win_t.a
+        y_coords = win_t.f + (np.arange(rows) + 0.5) * win_t.e
+        dx = max(abs(float(np.max(x_coords)) - float(np.min(x_coords))), 1e-6)
+        dy = max(abs(float(np.max(y_coords)) - float(np.min(y_coords))), 1e-6)
+
+    horiz_scale_mm_per_unit = min(params.model_width_mm / dx, params.model_height_mm / dy)
+    return float((z_max - z_min) * horiz_scale_mm_per_unit * params.vertical_scale)
