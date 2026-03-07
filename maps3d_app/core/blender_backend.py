@@ -294,14 +294,11 @@ def run_blender_pipeline(
         str(blender_exe),
         "--background",
         "--factory-startup",
-        "--log-file",
-        str(log_file),
-        "--log-level",
-        "2",
-        "--python",
-        str(blender_script),
-        "--",
-        str(job_json),
+        "--python-exit-code", "1",   # <- IMPORTANTISSIMO
+        "--log-file", str(log_file),
+        "--log-level", "2",
+        "--python", str(blender_script),
+        "--", str(job_json),
     ]
 
     result = subprocess.run(cmd, capture_output=True, text=True)
