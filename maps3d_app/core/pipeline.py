@@ -5,11 +5,45 @@ from pathlib import Path
 
 import numpy as np
 import rasterio
-from pyproj import Transformer
+from pyproj import Geod, Transformer
 import trimesh
 
 from .gpx_loader import load_gpx_points
 from .mesh_builder import build_terrain_mesh, build_track_mesh
+
+_WGS84_GEOD = Geod(ellps="WGS84")
+
+
+def _model_horizontal_scale_mm_per_meter(ds: rasterio.io.DatasetReader, window: rasterio.windows.Window, model_width_mm: float, model_height_mm: float) -> float:
+    win_t = ds.window_transform(window)
+    rows = int(window.height)
+    cols = int(window.width)
+
+    x_coords = win_t.c + (np.arange(cols) + 0.5) * win_t.a
+    y_coords = win_t.f + (np.arange(rows) + 0.5) * win_t.e
+
+    dx_units = max(abs(float(np.max(x_coords)) - float(np.min(x_coords))), 1e-9)
+    dy_units = max(abs(float(np.max(y_coords)) - float(np.min(y_coords))), 1e-9)
+
+    if ds.crs is not None and ds.crs.is_projected:
+        unit_factor = float(getattr(ds.crs, "linear_units_factor", 1.0) or 1.0)
+        span_x_m = max(dx_units * unit_factor, 1e-6)
+        span_y_m = max(dy_units * unit_factor, 1e-6)
+    else:
+        left, bottom, right, top = rasterio.windows.bounds(window, ds.transform)
+        if ds.crs is not None and str(ds.crs).upper() != "EPSG:4326":
+            to_lonlat = Transformer.from_crs(ds.crs, "EPSG:4326", always_xy=True)
+            lons, lats = to_lonlat.transform([left, right, left, right], [bottom, bottom, top, top])
+            left, right = float(min(lons)), float(max(lons))
+            bottom, top = float(min(lats)), float(max(lats))
+
+        mid_lat = (bottom + top) * 0.5
+        _, _, span_x_m = _WGS84_GEOD.inv(left, mid_lat, right, mid_lat)
+        _, _, span_y_m = _WGS84_GEOD.inv((left + right) * 0.5, bottom, (left + right) * 0.5, top)
+        span_x_m = max(abs(float(span_x_m)), 1e-6)
+        span_y_m = max(abs(float(span_y_m)), 1e-6)
+
+    return min(model_width_mm / span_x_m, model_height_mm / span_y_m)
 
 
 @dataclass
@@ -119,8 +153,8 @@ def run_python_pipeline(
         if y_coords[0] > y_coords[-1]:
             dem = np.flipud(dem)
 
-        horiz_scale_mm_per_unit = min(config.model_width_mm / dx, config.model_height_mm / dy)
-        z_mm = (dem - min_elev) * horiz_scale_mm_per_unit * config.vertical_scale
+        horiz_scale_mm_per_meter = _model_horizontal_scale_mm_per_meter(ds, window, config.model_width_mm, config.model_height_mm)
+        z_mm = (dem - min_elev) * horiz_scale_mm_per_meter * config.vertical_scale
 
         track_x_mm = (points_dem[:, 0] - min(x_min, x_max)) / dx * config.model_width_mm
         track_y_mm = (points_dem[:, 1] - min(y_min, y_max)) / dy * config.model_height_mm
@@ -213,12 +247,8 @@ def estimate_relief_mm(gpx_path: str | Path, dem_path: str | Path, params: Gener
         z_min = float(np.nanmin(dem))
         z_max = float(np.nanmax(dem))
 
-        win_t = ds.window_transform(window)
-        rows, cols = dem.shape
-        x_coords = win_t.c + (np.arange(cols) + 0.5) * win_t.a
-        y_coords = win_t.f + (np.arange(rows) + 0.5) * win_t.e
-        dx = max(abs(float(np.max(x_coords)) - float(np.min(x_coords))), 1e-6)
-        dy = max(abs(float(np.max(y_coords)) - float(np.min(y_coords))), 1e-6)
+        horiz_scale_mm_per_meter = _model_horizontal_scale_mm_per_meter(
+            ds, window, params.model_width_mm, params.model_height_mm
+        )
 
-    horiz_scale_mm_per_unit = min(params.model_width_mm / dx, params.model_height_mm / dy)
-    return float((z_max - z_min) * horiz_scale_mm_per_unit * params.vertical_scale)
+    return float((z_max - z_min) * horiz_scale_mm_per_meter * params.vertical_scale)
