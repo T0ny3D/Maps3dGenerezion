@@ -56,6 +56,51 @@ def _append_run_log(log_path: Path, content: str) -> None:
             fh.write("\n")
 
 
+def _resolve_blender_script_path() -> Path:
+    base_dir = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent.parent.parent))
+    candidates = [
+        base_dir / "maps3d_app" / "engine" / "blender_script.py",
+        base_dir / "engine" / "blender_script.py",
+        Path(__file__).resolve().parent.parent / "engine" / "blender_script.py",
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+
+    embedded_script = pkgutil.get_data("maps3d_app.engine", "blender_script.py")
+    if embedded_script:
+        temp_script = Path(tempfile.gettempdir()) / "maps3d_app_blender_script.py"
+        temp_script.write_bytes(embedded_script)
+        return temp_script
+
+    searched = "\n".join(f"- {p}" for p in candidates)
+    raise FileNotFoundError(f"Script Blender non trovato. Percorsi controllati:\n{searched}")
+
+
+ codex/fix-windows-build-issues-with-stl-and-3mf-srts32
+
+codex/fix-windows-build-issues-with-stl-and-3mf-rqih8u
+ main
+def _tail_text(text: str | None, lines: int = 40) -> str:
+    if not text:
+        return "<vuoto>"
+    rows = text.rstrip().splitlines()
+    return "\n".join(rows[-lines:])
+
+
+def _append_run_log(log_path: Path, content: str) -> None:
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    with log_path.open("a", encoding="utf-8", errors="replace") as fh:
+        fh.write(content)
+        if not content.endswith("\n"):
+            fh.write("\n")
+
+
+ codex/fix-windows-build-issues-with-stl-and-3mf-srts32
+
+
+main
+ main
 def _autodetect_blender_exe() -> str | None:
     if os.name == "nt":
         roots = [Path("C:/Program Files/Blender Foundation"), Path("C:/Program Files (x86)/Blender Foundation")]
@@ -314,6 +359,7 @@ def run_blender_pipeline(
 
     job_dir, job_json = _prepare_job_assets(gpx_path, dem_path, out_stl_path, params)
 
+ codex/fix-windows-build-issues-with-stl-and-3mf-vf8pht
     model_relief_mm = estimate_relief_mm(gpx_path, dem_path, params)
     max_model_span_mm = max(float(params.model_width_mm), float(params.model_height_mm), 1.0)
     if model_relief_mm > max_model_span_mm * 5.0:
@@ -324,18 +370,35 @@ def run_blender_pipeline(
             "Controlla CRS/unità del DEM o riduci la scala verticale."
         )
 
+
+ main
     job_log_file = Path(job_dir) / "blender_run.log"
     output_log_file = Path(out_stl_path).resolve().parent / "blender_run.log"
 
     # DEBUG: così lo vedi nel log della UI
     print(f"[blender] Job dir: {job_dir}")
     print(f"[blender] Job json: {job_json}")
+ codex/fix-windows-build-issues-with-stl-and-3mf-vf8pht
+
+ codex/fix-windows-build-issues-with-stl-and-3mf-srts32
+
+    codex/fix-windows-build-issues-with-stl-and-3mf-rqih8u
+ main
+ main
     print(f"[blender] Blender script: {blender_script}")
     print(f"[blender] Blender log (job): {job_log_file}")
     print(f"[blender] Blender log (output): {output_log_file}")
 
     if not job_json.exists():
         raise RuntimeError(f"Job JSON non creato: {job_json}")
+ codex/fix-windows-build-issues-with-stl-and-3mf-vf8pht
+
+ codex/fix-windows-build-issues-with-stl-and-3mf-srts32
+
+    print(f"[blender] Blender log: {log_file}")
+    main
+ main
+ main
 
     cmd = [
         str(blender_exe),
