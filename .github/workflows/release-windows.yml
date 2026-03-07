@@ -84,6 +84,19 @@ jobs:
           $archive = pyi-archive_viewer -r dist\Maps3DGen_NEW.exe | Out-String
           $archive | Out-File -FilePath dist\pyi-archive.txt -Encoding utf8
 
+ codex/fix-windows-build-issues-with-stl-and-3mf-dsfco0
+          $backendPatterns = @(
+            "maps3d_app.core.blender_backend",
+            "maps3d_app/core/blender_backend.pyc",
+            "maps3d_app\\core\\blender_backend.pyc",
+            "blender_backend"
+          )
+          $scriptPatterns = @(
+            "maps3d_app/engine/blender_script.py",
+            "maps3d_app\\engine\\blender_script.py",
+            "blender_script.py",
+            "blender_script"
+
  codex/fix-windows-build-issues-with-stl-and-3mf-srts32
           $backendPatterns = @(
             'maps3d_app.core.blender_backend',
@@ -96,6 +109,7 @@ jobs:
             'maps3d_app\engine\blender_script.py',
             'blender_script.py',
             'blender_script'
+ main
           )
 
           $hasBackend = $false
@@ -117,9 +131,15 @@ jobs:
           }
 
           if (-not $hasBackend -or -not $hasScript) {
+ codex/fix-windows-build-issues-with-stl-and-3mf-dsfco0
+            Write-Host "--- Candidate lines (blender_backend|blender_script|maps3d_app|PYZ) ---"
+            $archive -split "`r?`n" |
+              Select-String -Pattern "blender_backend|blender_script|maps3d_app|PYZ" |
+
             Write-Host '--- Candidate lines (blender_backend|blender_script|maps3d_app|PYZ) ---'
             $archive -split "`r?`n" |
               Select-String -Pattern 'blender_backend|blender_script|maps3d_app|PYZ' |
+ main
               ForEach-Object { Write-Host $_.Line }
           }
 
@@ -129,6 +149,8 @@ jobs:
 
           if (-not $hasScript) {
             throw "PyInstaller payload missing blender script (checked: $($scriptPatterns -join ', '))"
+ codex/fix-windows-build-issues-with-stl-and-3mf-dsfco0
+
 
           if ($archive -notmatch "maps3d_app.core.blender_backend") {
             throw "PyInstaller payload missing maps3d_app.core.blender_backend"
@@ -136,6 +158,7 @@ jobs:
 
           if ($archive -notmatch "blender_script.py") {
             throw "PyInstaller payload missing blender_script.py"
+ main
  main
           }
 
