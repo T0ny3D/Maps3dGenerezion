@@ -63,6 +63,22 @@ jobs:
           "tag=$tag" >> $env:GITHUB_OUTPUT
           Write-Host "Using tag: $tag"
 
+      - name: Pre-build diagnostics (core module presence)
+        shell: pwsh
+        run: |
+          Write-Host "Listing maps3d_app\core"
+          Get-ChildItem -Force maps3d_app\core | Format-Table -AutoSize
+
+          Write-Host "--- maps3d_app\core\__init__.py ---"
+          if (Test-Path "maps3d_app\core\__init__.py") {
+            Get-Content "maps3d_app\core\__init__.py"
+          } else {
+            Write-Host "__init__.py not found"
+          }
+
+          Write-Host "Test-Path maps3d_app\core\blender_backend.py"
+          Test-Path "maps3d_app\core\blender_backend.py"
+
       - name: Build EXE (PyInstaller)
         shell: pwsh
         run: |
@@ -70,6 +86,7 @@ jobs:
             --paths . `
             launcher.py `
             --collect-submodules maps3d_app `
+            --collect-submodules maps3d_app.core `
             --hidden-import maps3d_app.core.blender_backend `
             --collect-all rasterio `
             --collect-all pyproj `
@@ -85,6 +102,18 @@ jobs:
           $archive | Out-File -FilePath dist\pyi-archive.txt -Encoding utf8
 
           $backendPatterns = @(
+ codex/fix-windows-build-issues-with-stl-and-3mf-tbndk3
+            "maps3d_app\.core\.blender_backend",
+            "maps3d_app/core/blender_backend.pyc",
+            "maps3d_app\core\blender_backend.pyc",
+            "blender_backend"
+          )
+          $scriptPatterns = @(
+            "maps3d_app/engine/blender_script.py",
+            "maps3d_app\engine\blender_script.py",
+            "blender_script.py",
+            "blender_script"
+
             'maps3d_app\.core\.blender_backend',
             'maps3d_app/core/blender_backend\.pyc',
             'maps3d_app\\core\\blender_backend\.pyc',
@@ -96,6 +125,7 @@ jobs:
             'maps3d_app\\engine\\blender_script\.py',
             'blender_script\.py',
             'blender_script'
+ main
           )
 
           $hasBackend = $false
@@ -109,7 +139,11 @@ jobs:
 
           $hasScript = $false
           foreach ($p in $scriptPatterns) {
+ codex/fix-windows-build-issues-with-stl-and-3mf-tbndk3
+            if ($archive -match [regex]::Escape($p)) {
+
             if ($archive -match $p) {
+ main
               Write-Host "Matched script pattern: $p"
               $hasScript = $true
               break
@@ -117,9 +151,15 @@ jobs:
           }
 
           if (-not $hasBackend -or -not $hasScript) {
+ codex/fix-windows-build-issues-with-stl-and-3mf-tbndk3
+            Write-Host "--- Candidate lines (blender_backend|blender_script|maps3d_app|PYZ) ---"
+            $archive -split "`r?`n" |
+              Select-String -Pattern "blender_backend|blender_script|maps3d_app|PYZ" |
+
             Write-Host '--- Candidate lines (blender_backend|blender_script|maps3d_app|PYZ) ---'
             $archive -split "`r?`n" |
               Select-String -Pattern 'blender_backend|blender_script|maps3d_app|PYZ' |
+ main
               ForEach-Object { Write-Host $_.Line }
           }
 
