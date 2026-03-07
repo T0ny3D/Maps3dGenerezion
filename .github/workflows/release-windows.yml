@@ -102,6 +102,7 @@ jobs:
           $archive | Out-File -FilePath dist\pyi-archive.txt -Encoding utf8
 
           $backendPatterns = @(
+ codex/fix-windows-build-issues-with-stl-and-3mf-tbndk3
             "maps3d_app\.core\.blender_backend",
             "maps3d_app/core/blender_backend.pyc",
             "maps3d_app\core\blender_backend.pyc",
@@ -112,6 +113,19 @@ jobs:
             "maps3d_app\engine\blender_script.py",
             "blender_script.py",
             "blender_script"
+
+            'maps3d_app\.core\.blender_backend',
+            'maps3d_app/core/blender_backend\.pyc',
+            'maps3d_app\\core\\blender_backend\.pyc',
+            'blender_backend'
+          )
+
+          $scriptPatterns = @(
+            'maps3d_app/engine/blender_script\.py',
+            'maps3d_app\\engine\\blender_script\.py',
+            'blender_script\.py',
+            'blender_script'
+ main
           )
 
           $hasBackend = $false
@@ -125,7 +139,11 @@ jobs:
 
           $hasScript = $false
           foreach ($p in $scriptPatterns) {
+ codex/fix-windows-build-issues-with-stl-and-3mf-tbndk3
             if ($archive -match [regex]::Escape($p)) {
+
+            if ($archive -match $p) {
+ main
               Write-Host "Matched script pattern: $p"
               $hasScript = $true
               break
@@ -133,9 +151,15 @@ jobs:
           }
 
           if (-not $hasBackend -or -not $hasScript) {
+ codex/fix-windows-build-issues-with-stl-and-3mf-tbndk3
             Write-Host "--- Candidate lines (blender_backend|blender_script|maps3d_app|PYZ) ---"
             $archive -split "`r?`n" |
               Select-String -Pattern "blender_backend|blender_script|maps3d_app|PYZ" |
+
+            Write-Host '--- Candidate lines (blender_backend|blender_script|maps3d_app|PYZ) ---'
+            $archive -split "`r?`n" |
+              Select-String -Pattern 'blender_backend|blender_script|maps3d_app|PYZ' |
+ main
               ForEach-Object { Write-Host $_.Line }
           }
 
