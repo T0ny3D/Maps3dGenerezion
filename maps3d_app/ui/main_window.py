@@ -22,13 +22,13 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ..core.pipeline import estimate_relief_mm
 from ..core.dem_downloader import download_srtm_dem_for_bbox
 from ..core.pipeline import (
     GenerateConfig,
     compute_gpx_bbox_lonlat,
     default_dem_output_path_for_gpx,
     run_pipeline,
+    estimate_relief_mm,
 )
 from .preview3d import Preview3DWidget
 
@@ -475,7 +475,13 @@ class MainWindow(QMainWindow):
     def _on_worker_error(self, err: str, what: str) -> None:
         self._append_log(f"[{what}] errore: {err}")
         self.status.setText("Errore")
-        QMessageBox.critical(self, f"Errore {what}", err)
+        msg = QMessageBox(self)
+        msg.setIcon(QMessageBox.Icon.Critical)
+        msg.setWindowTitle(f"Errore {what}")
+        msg.setText(f"Errore durante {what}.")
+        msg.setInformativeText(err.splitlines()[0] if err else "Errore sconosciuto")
+        msg.setDetailedText(err)
+        msg.exec()
 
     # ---------- ACTIONS ----------
 
