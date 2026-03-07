@@ -1,141 +1,25 @@
-name: Build Windows EXE and publish Release
-
-on:
-  push:
-    tags:
-      - "v*"
-  release:
-    types: [published]
-  workflow_dispatch:
-    inputs:
-      tag_name:
-        description: "Tag della release (es: v0.1.0). Se vuoto: usa il tag dell'evento o crea manual-..."
-        required: false
-        default: ""
-
-permissions:
-  contents: write
-
-jobs:
-  build-windows:
-    runs-on: windows-2022
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Install dependencies
-        shell: pwsh
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install pyinstaller
-
-      - name: Determine release tag
-        id: rel
-        shell: pwsh
-        run: |
-          $tag = ""
-
-          if ("${{ github.event_name }}" -eq "push") {
-            $tag = "${{ github.ref_name }}"
-          }
-          elseif ("${{ github.event_name }}" -eq "release") {
-            $tag = "${{ github.event.release.tag_name }}"
-          }
-          elseif ("${{ github.event_name }}" -eq "workflow_dispatch") {
-            if ("${{ inputs.tag_name }}" -ne "") {
-              $tag = "${{ inputs.tag_name }}"
-            } else {
-              $tag = "manual-$((Get-Date).ToString('yyyyMMdd-HHmmss'))"
-            }
-          }
-
-          if ($tag -eq "") { throw "Tag non determinato (evento: ${{ github.event_name }})" }
-
-          "tag=$tag" >> $env:GITHUB_OUTPUT
-          Write-Host "Using tag: $tag"
-
-      - name: Build EXE (PyInstaller)
-        shell: pwsh
-        run: |
-          pyinstaller --noconfirm --onefile --windowed --name Maps3DGen_NEW `
-            --paths . `
-            launcher.py `
-            --collect-submodules maps3d_app `
-            --hidden-import maps3d_app.core.blender_backend `
-            --collect-all rasterio `
-            --collect-all pyproj `
-            --collect-all shapely `
-            --add-data "maps3d_app/engine/blender_script.py;maps3d_app/engine"
-
-          if (!(Test-Path "dist\Maps3DGen_NEW.exe")) { throw "EXE not found in dist\Maps3DGen_NEW.exe" }
-
       - name: Smoke check PyInstaller payload (backend Blender + script)
         shell: pwsh
         run: |
           $archive = pyi-archive_viewer -r dist\Maps3DGen_NEW.exe | Out-String
           $archive | Out-File -FilePath dist\pyi-archive.txt -Encoding utf8
 
- codex/fix-windows-build-issues-with-stl-and-3mf-n7e9c8
           $backendPatterns = @(
             "maps3d_app\.core\.blender_backend",
             "maps3d_app/core/blender_backend.pyc",
             "maps3d_app\core\blender_backend.pyc",
- codex/fix-windows-build-issues-with-stl-and-3mf-vf8pht
- codex/fix-windows-build-issues-with-stl-and-3mf-vf8pht
-
- codex/fix-windows-build-issues-with-stl-and-3mf-dsfco0
-          $backendPatterns = @(
-            "maps3d_app.core.blender_backend",
-            "maps3d_app/core/blender_backend.pyc",
-            "maps3d_app\\core\\blender_backend.pyc",
- main
             "blender_backend"
           )
           $scriptPatterns = @(
             "maps3d_app/engine/blender_script.py",
- codex/fix-windows-build-issues-with-stl-and-3mf-n7e9c8
             "maps3d_app\engine\blender_script.py",
             "blender_script.py",
             "blender_script"
-
-            "maps3d_app\\engine\\blender_script.py",
-            "blender_script.py",
-            "blender_script"
- main
-
- codex/fix-windows-build-issues-with-stl-and-3mf-srts32
- main
-          $backendPatterns = @(
-            'maps3d_app.core.blender_backend',
-            'maps3d_app/core/blender_backend.pyc',
-            'maps3d_app\core\blender_backend.pyc',
-            'blender_backend'
-          )
-          $scriptPatterns = @(
-            'maps3d_app/engine/blender_script.py',
-            'maps3d_app\engine\blender_script.py',
-            'blender_script.py',
-            'blender_script'
- main
- main
           )
 
           $hasBackend = $false
           foreach ($p in $backendPatterns) {
- codex/fix-windows-build-issues-with-stl-and-3mf-n7e9c8
             if ($archive -match $p) {
-
-            if ($archive -match [regex]::Escape($p)) {
- main
               Write-Host "Matched backend pattern: $p"
               $hasBackend = $true
               break
@@ -152,21 +36,9 @@ jobs:
           }
 
           if (-not $hasBackend -or -not $hasScript) {
- codex/fix-windows-build-issues-with-stl-and-3mf-n7e9c8
             Write-Host "--- Candidate lines (blender_backend|blender_script|maps3d_app|PYZ) ---"
             $archive -split "`r?`n" |
               Select-String -Pattern "blender_backend|blender_script|maps3d_app|PYZ" |
-
- codex/fix-windows-build-issues-with-stl-and-3mf-dsfco0
-            Write-Host "--- Candidate lines (blender_backend|blender_script|maps3d_app|PYZ) ---"
-            $archive -split "`r?`n" |
-              Select-String -Pattern "blender_backend|blender_script|maps3d_app|PYZ" |
-
-            Write-Host '--- Candidate lines (blender_backend|blender_script|maps3d_app|PYZ) ---'
-            $archive -split "`r?`n" |
-              Select-String -Pattern 'blender_backend|blender_script|maps3d_app|PYZ' |
- main
- main
               ForEach-Object { Write-Host $_.Line }
           }
 
@@ -176,41 +48,4 @@ jobs:
 
           if (-not $hasScript) {
             throw "PyInstaller payload missing blender script (checked: $($scriptPatterns -join ', '))"
- codex/fix-windows-build-issues-with-stl-and-3mf-n7e9c8
-
- codex/fix-windows-build-issues-with-stl-and-3mf-vf8pht
- codex/fix-windows-build-issues-with-stl-and-3mf-vf8pht
-
- codex/fix-windows-build-issues-with-stl-and-3mf-dsfco0
- main
-
-
-          if ($archive -notmatch "maps3d_app.core.blender_backend") {
-            throw "PyInstaller payload missing maps3d_app.core.blender_backend"
           }
-
-          if ($archive -notmatch "blender_script.py") {
-            throw "PyInstaller payload missing blender_script.py"
- main
- main
- main
-          }
-
-      - name: Upload EXE as workflow artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: Maps3DGen-Windows
-          path: dist/Maps3DGen_NEW.exe
-
-      - name: Publish EXE to GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ steps.rel.outputs.tag }}
-          name: ${{ steps.rel.outputs.tag }}
-          body: Automated build
-          draft: false
-          prerelease: false
-          files: dist/Maps3DGen_NEW.exe
-          fail_on_unmatched_files: true
-          generate_release_notes: true
-          make_latest: true
