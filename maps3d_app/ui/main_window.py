@@ -22,13 +22,13 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ..core.pipeline import estimate_relief_mm
 from ..core.dem_downloader import download_srtm_dem_for_bbox
 from ..core.pipeline import (
     GenerateConfig,
     compute_gpx_bbox_lonlat,
     default_dem_output_path_for_gpx,
     run_pipeline,
+    estimate_relief_mm,
 )
 from .preview3d import Preview3DWidget
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import pkgutil
 import shutil
 import subprocess
 import sys
@@ -17,6 +18,27 @@ from pyproj import Transformer
 
 from .gpx_loader import load_gpx_points
 from .pipeline import GenerateConfig, _compute_bbox
+
+
+def _resolve_blender_script_path() -> Path:
+    base_dir = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent.parent.parent))
+    candidates = [
+        base_dir / "maps3d_app" / "engine" / "blender_script.py",
+        base_dir / "engine" / "blender_script.py",
+        Path(__file__).resolve().parent.parent / "engine" / "blender_script.py",
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+
+    embedded_script = pkgutil.get_data("maps3d_app.engine", "blender_script.py")
+    if embedded_script:
+        temp_script = Path(tempfile.gettempdir()) / "maps3d_app_blender_script.py"
+        temp_script.write_bytes(embedded_script)
+        return temp_script
+
+    searched = "\n".join(f"- {p}" for p in candidates)
+    raise FileNotFoundError(f"Script Blender non trovato. Percorsi controllati:\n{searched}")
 
 
 def _autodetect_blender_exe() -> str | None:
@@ -162,11 +184,6 @@ out geom;
     return layers
 
 
-def estimate_relief_mm(gpx_path: str | Path, dem_path: str | Path, params: GenerateConfig) -> float:
-    _, _, _, _, z_range_mm, _, _, _, _ = _compute_dem_metrics(gpx_path, dem_path, params)
-    return float(z_range_mm * params.vertical_scale)
-
-
 def _prepare_job_assets(
     gpx_path: str | Path,
     dem_path: str | Path,
@@ -276,10 +293,7 @@ def run_blender_pipeline(
     if not blender_exe:
         raise ValueError("Blender non trovato. Specifica il percorso di blender.exe nella UI.")
 
-    base_dir = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent.parent.parent))
-    blender_script = base_dir / "maps3d_app" / "engine" / "blender_script.py"
-    if not blender_script.exists():
-        raise FileNotFoundError(f"Script Blender non trovato: {blender_script}")
+    blender_script = _resolve_blender_script_path()
 
     job_dir, job_json = _prepare_job_assets(gpx_path, dem_path, out_stl_path, params)
     
@@ -288,7 +302,7 @@ def run_blender_pipeline(
     # DEBUG: così lo vedi nel log della UI
     print(f"[blender] Job dir: {job_dir}")
     print(f"[blender] Job json: {job_json}")
-    print(f"[blender] Blender log: {log_file}"
+    print(f"[blender] Blender log: {log_file}")
 
     cmd = [
         str(blender_exe),
