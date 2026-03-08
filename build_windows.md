@@ -19,13 +19,13 @@ pip install pyinstaller
 
 pyinstaller --noconfirm --onefile --windowed --name Maps3DGen_NEW `
   --paths . `
-  launcher.py `
   --collect-submodules maps3d_app `
   --hidden-import maps3d_app.core.blender_backend `
   --collect-all rasterio `
   --collect-all pyproj `
   --collect-all shapely `
-  --add-data "maps3d_app/engine/blender_script.py;maps3d_app/engine"
+  --add-data "maps3d_app/engine/blender_script.py;maps3d_app/engine" `
+  launcher.py
 ```
 
 Expected output:
