@@ -113,6 +113,41 @@ def _curve_from_points(points: list[tuple[float, float]], name: str) -> bpy.type
     return cobj
 
 
+def _set_object_active_selected(obj: bpy.types.Object) -> None:
+    view_layer = bpy.context.view_layer
+    for candidate in view_layer.objects:
+        candidate.select_set(False)
+    obj.hide_set(False)
+    obj.hide_viewport = False
+    obj.select_set(True)
+    view_layer.objects.active = obj
+    if bpy.context.mode != "OBJECT":
+        bpy.ops.object.mode_set(mode="OBJECT")
+
+
+def _curve_to_mesh(curve_obj: bpy.types.Object, name: str) -> bpy.types.Object:
+    depsgraph = bpy.context.evaluated_depsgraph_get()
+    eval_obj = curve_obj.evaluated_get(depsgraph)
+    try:
+        mesh_data = bpy.data.meshes.new_from_object(eval_obj, preserve_all_data_layers=True, depsgraph=depsgraph)
+    except TypeError:
+        mesh_data = bpy.data.meshes.new_from_object(eval_obj, depsgraph=depsgraph)
+
+    mesh_obj = bpy.data.objects.new(name, mesh_data)
+    mesh_obj.matrix_world = curve_obj.matrix_world.copy()
+
+    linked = False
+    for collection in curve_obj.users_collection:
+        collection.objects.link(mesh_obj)
+        linked = True
+    if not linked:
+        bpy.context.collection.objects.link(mesh_obj)
+
+    bpy.data.objects.remove(curve_obj, do_unlink=True)
+    _set_object_active_selected(mesh_obj)
+    return mesh_obj
+
+
 def _create_track_inlay(job: dict, terrain_top: bpy.types.Object) -> tuple[bpy.types.Object | None, bpy.types.Object | None]:
     if not bool(job.get("track_inlay_enabled", True)):
         return None, None
@@ -140,9 +175,8 @@ def _create_track_inlay(job: dict, terrain_top: bpy.types.Object) -> tuple[bpy.t
     groove_curve.data.bevel_depth = groove_width / 2.0
     groove_curve.data.fill_mode = "FULL"
     groove_curve.data.extrude = groove_depth
-    bpy.context.view_layer.objects.active = groove_curve
-    bpy.ops.object.convert(target="MESH")
-    groove_mesh = bpy.context.active_object
+    _set_object_active_selected(groove_curve)
+    groove_mesh = _curve_to_mesh(groove_curve, "GrooveCurve")
 
     bm = bmesh.new()
     bm.from_mesh(groove_mesh.data)
@@ -168,14 +202,14 @@ def _create_track_inlay(job: dict, terrain_top: bpy.types.Object) -> tuple[bpy.t
     track_curve.data.bevel_depth = track_width / 2.0
     track_curve.data.fill_mode = "FULL"
     track_curve.data.extrude = total_h
-    bpy.context.view_layer.objects.active = track_curve
-    bpy.ops.object.convert(target="MESH")
-    track_mesh = bpy.context.active_object
+    _set_object_active_selected(track_curve)
+    track_mesh = _curve_to_mesh(track_curve, "TrackInlayCurve")
 
     bev = track_mesh.modifiers.new(name="TopRound", type="BEVEL")
     bev.width = max(0.05, min(top_radius, track_width * 0.45))
     bev.segments = 3
     bev.limit_method = "ANGLE"
+    _set_object_active_selected(track_mesh)
     bpy.ops.object.modifier_apply(modifier=bev.name)
 
     _enable_smooth_shading(track_mesh)
