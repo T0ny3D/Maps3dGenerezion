@@ -82,6 +82,8 @@ jobs:
       - name: Build EXE (PyInstaller)
         shell: pwsh
         run: |
+          # Keep launcher.py as the final positional argument; moving it earlier
+          # can cause later options to be treated as launcher args.
           pyinstaller --noconfirm --onefile --windowed --name Maps3DGen_NEW `
             --paths . `
             --collect-submodules maps3d_app `
