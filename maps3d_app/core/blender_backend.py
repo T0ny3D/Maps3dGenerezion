@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import pkgutil
@@ -40,6 +41,24 @@ def _resolve_blender_script_path() -> Path:
     searched = "\n".join(f"- {p}" for p in candidates)
     raise FileNotFoundError(f"Script Blender non trovato. Percorsi controllati:\n{searched}")
 
+
+def _inspect_blender_script(script_path: Path) -> dict[str, Any]:
+    info: dict[str, Any] = {"path": str(script_path), "exists": script_path.exists()}
+    if not script_path.exists():
+        return info
+
+    raw = script_path.read_bytes()
+    text = raw.decode("utf-8", errors="replace")
+    info.update(
+        {
+            "size": len(raw),
+            "sha256": hashlib.sha256(raw).hexdigest(),
+            "has_track_debug_tag": "[maps3d][track_inlay]" in text,
+            "has_curve_to_mesh_helper": "def _curve_to_mesh" in text,
+            "has_resample_cap": "max_points" in text and "resample src_points" in text,
+        }
+    )
+    return info
 
 def _tail_text(text: str | None, lines: int = 40) -> str:
     if not text:
@@ -311,6 +330,7 @@ def run_blender_pipeline(
         raise ValueError("Blender non trovato. Specifica il percorso di blender.exe nella UI.")
 
     blender_script = _resolve_blender_script_path()
+    blender_script_info = _inspect_blender_script(blender_script)
 
     job_dir, job_json = _prepare_job_assets(gpx_path, dem_path, out_stl_path, params)
 
@@ -331,6 +351,7 @@ def run_blender_pipeline(
     print(f"[blender] Job dir: {job_dir}")
     print(f"[blender] Job json: {job_json}")
     print(f"[blender] Blender script: {blender_script}")
+    print(f"[blender] Blender script info: {blender_script_info}")
     print(f"[blender] Blender log (job): {job_log_file}")
     print(f"[blender] Blender log (output): {output_log_file}")
 
@@ -355,6 +376,7 @@ def run_blender_pipeline(
             "=== Blender run ===",
             f"command: {command_str}",
             f"blender_script: {blender_script}",
+            f"blender_script_info: {blender_script_info}",
             f"job_json: {job_json}",
             f"job_log: {job_log_file}",
         ]),
