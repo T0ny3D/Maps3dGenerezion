@@ -66,7 +66,6 @@ def _debug_log(message: str) -> None:
     print(f"[maps3d][track_inlay] {message}", flush=True)
 
 
- codex/fix-blender-runtime-geometry-crash-05cqpn
 def _points_bbox(points: list[tuple[float, float]]) -> tuple[float, float, float, float]:
     if not points:
         return 0.0, 0.0, 0.0, 0.0
@@ -80,7 +79,6 @@ def _fit_points_to_terrain(points: list[tuple[float, float]], size_x: float, siz
     max_x = max(p[0] for p in points)
     min_y = min(p[1] for p in points)
     max_y = max(p[1] for p in points)
- codex/fix-blender-runtime-geometry-crash-05cqpn
     return min_x, max_x, min_y, max_y
 
 
@@ -326,7 +324,6 @@ def _create_track_inlay(job: dict, terrain_top: bpy.types.Object) -> tuple[bpy.t
 
     raw_track_points = job.get("track_points_mm", [])
     points = _resample_track(raw_track_points, 1.0, max_points=max_track_points)
- codex/fix-blender-runtime-geometry-crash-05cqpn
     terrain_span_x = max(0.0, float(terrain_top.dimensions.x))
     terrain_span_y = max(0.0, float(terrain_top.dimensions.y))
     raw_min_x, raw_max_x, raw_min_y, raw_max_y = _points_bbox(points)
@@ -616,7 +613,6 @@ def main() -> None:
     groove, track_inlay = _create_track_inlay(job, terrain_for_layers)
     _stage_log("track", f"after track inlay creation groove={groove is not None} track={track_inlay is not None}")
     if groove is not None:
- codex/fix-blender-runtime-geometry-crash-05cqpn
         terrain_xy_guard = 1.03
         track_dx = track_inlay.dimensions.x if track_inlay is not None else 0.0
         track_dy = track_inlay.dimensions.y if track_inlay is not None else 0.0
