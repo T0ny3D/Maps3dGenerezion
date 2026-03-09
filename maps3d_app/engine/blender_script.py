@@ -34,10 +34,34 @@ def _apply_boolean(base: bpy.types.Object, tool: bpy.types.Object, op: str) -> N
     bpy.data.objects.remove(tool, do_unlink=True)
 
 
-def _resample_track(points: list[list[float]], step_mm: float = 1.0) -> list[tuple[float, float]]:
+def _debug_log(message: str) -> None:
+    print(f"[maps3d][track_inlay] {message}", flush=True)
+
+
+def _resample_track(points: list[list[float]], step_mm: float = 1.0, max_points: int = 50000) -> list[tuple[float, float]]:
     if len(points) < 2:
         return []
-    src = [(float(p[0]), float(p[1])) for p in points]
+
+    src: list[tuple[float, float]] = []
+    for p in points:
+        if len(p) < 2:
+            continue
+        x = float(p[0])
+        y = float(p[1])
+        if not math.isfinite(x) or not math.isfinite(y):
+            continue
+        src.append((x, y))
+    if len(src) < 2:
+        return []
+
+    total_len = 0.0
+    for i in range(1, len(src)):
+        total_len += math.hypot(src[i][0] - src[i - 1][0], src[i][1] - src[i - 1][1])
+
+    safe_step = max(0.001, float(step_mm))
+    max_points = max(1000, int(max_points))
+    adaptive_step = max(safe_step, total_len / max_points) if total_len > 0.0 else safe_step
+
     out: list[tuple[float, float]] = [src[0]]
     for i in range(1, len(src)):
         x0, y0 = src[i - 1]
@@ -45,10 +69,20 @@ def _resample_track(points: list[list[float]], step_mm: float = 1.0) -> list[tup
         seg = math.hypot(x1 - x0, y1 - y0)
         if seg < 1e-6:
             continue
-        pieces = max(1, int(math.ceil(seg / step_mm)))
+        pieces = max(1, int(math.ceil(seg / adaptive_step)))
         for j in range(1, pieces + 1):
             t = j / pieces
             out.append((x0 + (x1 - x0) * t, y0 + (y1 - y0) * t))
+
+    if len(out) > max_points:
+        stride = int(math.ceil(len(out) / max_points))
+        out = out[::stride]
+        if out[-1] != src[-1]:
+            out.append(src[-1])
+
+    _debug_log(
+        f"resample src_points={len(src)} total_len_mm={total_len:.3f} step_mm={adaptive_step:.6f} out_points={len(out)} cap={max_points}"
+    )
     return out if len(out) >= 2 else src
 
 
@@ -103,32 +137,87 @@ def _create_terrain(job: dict) -> bpy.types.Object:
 def _curve_from_points(points: list[tuple[float, float]], name: str) -> bpy.types.Object:
     cdata = bpy.data.curves.new(f"{name}Data", type="CURVE")
     cdata.dimensions = "3D"
-    cdata.resolution_u = 24
+    cdata.resolution_u = 1 if len(points) > 5000 else 24
     spline = cdata.splines.new(type="POLY")
     spline.points.add(len(points) - 1)
     for i, (x, y) in enumerate(points):
         spline.points[i].co = (x, y, 0.0, 1.0)
     cobj = bpy.data.objects.new(name, cdata)
     bpy.context.collection.objects.link(cobj)
+    _debug_log(f"curve name={name} points={len(points)} bevel_depth={float(cdata.bevel_depth):.4f} extrude={float(cdata.extrude):.4f} resolution_u={cdata.resolution_u}")
     return cobj
+
+
+def _set_object_active_selected(obj: bpy.types.Object) -> None:
+    view_layer = bpy.context.view_layer
+    for candidate in view_layer.objects:
+        candidate.select_set(False)
+    obj.hide_set(False)
+    obj.hide_viewport = False
+    obj.select_set(True)
+    view_layer.objects.active = obj
+    if bpy.context.mode != "OBJECT":
+        bpy.ops.object.mode_set(mode="OBJECT")
+
+
+def _curve_to_mesh(curve_obj: bpy.types.Object, name: str) -> bpy.types.Object:
+    depsgraph = bpy.context.evaluated_depsgraph_get()
+    eval_obj = curve_obj.evaluated_get(depsgraph)
+    try:
+        mesh_data = bpy.data.meshes.new_from_object(eval_obj, preserve_all_data_layers=True, depsgraph=depsgraph)
+    except TypeError:
+        mesh_data = bpy.data.meshes.new_from_object(eval_obj, depsgraph=depsgraph)
+
+    mesh_obj = bpy.data.objects.new(name, mesh_data)
+    mesh_obj.matrix_world = curve_obj.matrix_world.copy()
+
+    linked = False
+    for collection in curve_obj.users_collection:
+        collection.objects.link(mesh_obj)
+        linked = True
+    if not linked:
+        bpy.context.collection.objects.link(mesh_obj)
+
+    bpy.data.objects.remove(curve_obj, do_unlink=True)
+    _set_object_active_selected(mesh_obj)
+
+    _debug_log(
+        f"mesh name={name} verts={len(mesh_obj.data.vertices)} edges={len(mesh_obj.data.edges)} polys={len(mesh_obj.data.polygons)} "
+        f"dims=({mesh_obj.dimensions.x:.3f},{mesh_obj.dimensions.y:.3f},{mesh_obj.dimensions.z:.3f})"
+    )
+
+    return mesh_obj
 
 
 def _create_track_inlay(job: dict, terrain_top: bpy.types.Object) -> tuple[bpy.types.Object | None, bpy.types.Object | None]:
     if not bool(job.get("track_inlay_enabled", True)):
         return None, None
-    points = _resample_track(job.get("track_points_mm", []), 1.0)
+
+    size_x = abs(float(job.get("size_mm_x", 0.0)))
+    size_y = abs(float(job.get("size_mm_y", 0.0)))
+    perimeter_mm = max(1.0, 2.0 * (size_x + size_y))
+    max_track_points = min(120000, max(8000, int(perimeter_mm * 6.0)))
+
+    raw_track_points = job.get("track_points_mm", [])
+    points = _resample_track(raw_track_points, 1.0, max_points=max_track_points)
     if len(points) < 2:
+        _debug_log("track inlay skipped: not enough valid track points")
         return None, None
 
-    groove_width = float(job.get("groove_width_mm", 2.6))
-    groove_depth = float(job.get("groove_depth_mm", 1.6))
-    groove_chamfer = float(job.get("groove_chamfer_mm", 0.4))
-    clearance = float(job.get("track_clearance_mm", 0.2))
-    relief = float(job.get("track_relief_mm", 0.6))
-    top_radius = float(job.get("track_top_radius_mm", 0.8))
+    groove_width = max(0.2, float(job.get("groove_width_mm", 2.6)))
+    groove_depth = max(0.05, float(job.get("groove_depth_mm", 1.6)))
+    groove_chamfer = max(0.0, float(job.get("groove_chamfer_mm", 0.4)))
+    clearance = max(0.0, float(job.get("track_clearance_mm", 0.2)))
+    relief = max(0.0, float(job.get("track_relief_mm", 0.6)))
+    top_radius = max(0.0, float(job.get("track_top_radius_mm", 0.8)))
 
     track_width = max(0.4, groove_width - 2.0 * clearance)
     total_h = groove_depth + relief
+
+    _debug_log(
+        f"input raw_points={len(raw_track_points)} points={len(points)} terrain_dims=({terrain_top.dimensions.x:.3f},{terrain_top.dimensions.y:.3f},{terrain_top.dimensions.z:.3f}) "
+        f"groove_width={groove_width:.3f} groove_depth={groove_depth:.3f} track_width={track_width:.3f} total_h={total_h:.3f}"
+    )
 
     groove_curve = _curve_from_points(points, "GrooveCurve")
     sw = groove_curve.modifiers.new(name="GrooveSW", type="SHRINKWRAP")
@@ -140,9 +229,27 @@ def _create_track_inlay(job: dict, terrain_top: bpy.types.Object) -> tuple[bpy.t
     groove_curve.data.bevel_depth = groove_width / 2.0
     groove_curve.data.fill_mode = "FULL"
     groove_curve.data.extrude = groove_depth
-    bpy.context.view_layer.objects.active = groove_curve
-    bpy.ops.object.convert(target="MESH")
-    groove_mesh = bpy.context.active_object
+    _set_object_active_selected(groove_curve)
+    groove_mesh = _curve_to_mesh(groove_curve, "GrooveCurve")
+
+
+    edge_count = len(groove_mesh.data.edges)
+    if edge_count > 250000:
+        _debug_log(f"groove bevel skipped: excessive edge_count={edge_count}")
+    else:
+        bm = bmesh.new()
+        bm.from_mesh(groove_mesh.data)
+        bmesh.ops.bevel(
+            bm,
+            geom=list(bm.edges),
+            offset=max(0.05, min(groove_chamfer, groove_width * 0.2)),
+            segments=1,
+            profile=0.5,
+            affect="EDGES",
+            clamp_overlap=True,
+        )
+        bm.to_mesh(groove_mesh.data)
+        bm.free()
 
     bm = bmesh.new()
     bm.from_mesh(groove_mesh.data)
@@ -168,15 +275,23 @@ def _create_track_inlay(job: dict, terrain_top: bpy.types.Object) -> tuple[bpy.t
     track_curve.data.bevel_depth = track_width / 2.0
     track_curve.data.fill_mode = "FULL"
     track_curve.data.extrude = total_h
-    bpy.context.view_layer.objects.active = track_curve
-    bpy.ops.object.convert(target="MESH")
-    track_mesh = bpy.context.active_object
+    _set_object_active_selected(track_curve)
+    track_mesh = _curve_to_mesh(track_curve, "TrackInlayCurve")
 
     bev = track_mesh.modifiers.new(name="TopRound", type="BEVEL")
     bev.width = max(0.05, min(top_radius, track_width * 0.45))
     bev.segments = 3
     bev.limit_method = "ANGLE"
+
+    _debug_log(
+        f"top bevel pre-apply verts={len(track_mesh.data.vertices)} edges={len(track_mesh.data.edges)} polys={len(track_mesh.data.polygons)} width={bev.width:.4f} segments={bev.segments}"
+    )
+
+    _set_object_active_selected(track_mesh)
     bpy.ops.object.modifier_apply(modifier=bev.name)
+    _debug_log(
+        f"top bevel post-apply verts={len(track_mesh.data.vertices)} edges={len(track_mesh.data.edges)} polys={len(track_mesh.data.polygons)}"
+    )
 
     _enable_smooth_shading(track_mesh)
     return groove_mesh, track_mesh
