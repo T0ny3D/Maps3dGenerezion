@@ -66,14 +66,51 @@ def _debug_log(message: str) -> None:
     print(f"[maps3d][track_inlay] {message}", flush=True)
 
 
+ codex/fix-blender-runtime-geometry-crash-05cqpn
+def _points_bbox(points: list[tuple[float, float]]) -> tuple[float, float, float, float]:
+    if not points:
+        return 0.0, 0.0, 0.0, 0.0
+
 def _fit_points_to_terrain(points: list[tuple[float, float]], size_x: float, size_y: float) -> tuple[list[tuple[float, float]], bool]:
     if len(points) < 2:
         return points, False
 
+ main
     min_x = min(p[0] for p in points)
     max_x = max(p[0] for p in points)
     min_y = min(p[1] for p in points)
     max_y = max(p[1] for p in points)
+ codex/fix-blender-runtime-geometry-crash-05cqpn
+    return min_x, max_x, min_y, max_y
+
+
+def _fit_points_to_terrain(points: list[tuple[float, float]], size_x: float, size_y: float) -> tuple[list[tuple[float, float]], bool, str]:
+    if len(points) < 2:
+        return points, False, "insufficient_points"
+
+    min_x, max_x, min_y, max_y = _points_bbox(points)
+    span_x = max(1e-6, max_x - min_x)
+    span_y = max(1e-6, max_y - min_y)
+    terrain_span_x = max(1e-6, float(size_x))
+    terrain_span_y = max(1e-6, float(size_y))
+    span_overflow = span_x > (terrain_span_x * 1.01) or span_y > (terrain_span_y * 1.01)
+    bounds_overflow = min_x < -0.5 or min_y < -0.5 or max_x > (terrain_span_x + 0.5) or max_y > (terrain_span_y + 0.5)
+    need_fit = span_overflow or bounds_overflow
+    reason = "span_overflow" if span_overflow else ("out_of_bounds" if bounds_overflow else "within_bounds")
+
+    if not need_fit:
+        return points, False, reason
+
+    sx = terrain_span_x / span_x
+    sy = terrain_span_y / span_y
+    scale = min(sx, sy)
+    src_cx = (min_x + max_x) * 0.5
+    src_cy = (min_y + max_y) * 0.5
+    dst_cx = terrain_span_x * 0.5
+    dst_cy = terrain_span_y * 0.5
+    out = [((x - src_cx) * scale + dst_cx, (y - src_cy) * scale + dst_cy) for (x, y) in points]
+    return out, True, reason
+
     span_x = max(1e-6, max_x - min_x)
     span_y = max(1e-6, max_y - min_y)
 
@@ -93,6 +130,7 @@ def _fit_points_to_terrain(points: list[tuple[float, float]], size_x: float, siz
         f"track footprint normalized src_span=({span_x:.3f},{span_y:.3f}) terrain_span=({size_x:.3f},{size_y:.3f}) scale={scale:.6f}"
     )
     return out, True
+ main
 
 
 def _simplify_mesh_for_boolean(mesh_obj: bpy.types.Object, target_polys: int) -> bool:
@@ -288,7 +326,18 @@ def _create_track_inlay(job: dict, terrain_top: bpy.types.Object) -> tuple[bpy.t
 
     raw_track_points = job.get("track_points_mm", [])
     points = _resample_track(raw_track_points, 1.0, max_points=max_track_points)
+ codex/fix-blender-runtime-geometry-crash-05cqpn
+    terrain_span_x = max(0.0, float(terrain_top.dimensions.x))
+    terrain_span_y = max(0.0, float(terrain_top.dimensions.y))
+    raw_min_x, raw_max_x, raw_min_y, raw_max_y = _points_bbox(points)
+    points, normalized, fit_reason = _fit_points_to_terrain(points, terrain_span_x, terrain_span_y)
+    fit_min_x, fit_max_x, fit_min_y, fit_max_y = _points_bbox(points)
+    _debug_log(
+        f"fit_check raw_bbox=({raw_min_x:.3f},{raw_max_x:.3f},{raw_min_y:.3f},{raw_max_y:.3f}) fitted_bbox=({fit_min_x:.3f},{fit_max_x:.3f},{fit_min_y:.3f},{fit_max_y:.3f}) terrain_span=({terrain_span_x:.3f},{terrain_span_y:.3f}) applied={normalized} reason={fit_reason}"
+    )
+
     points, normalized = _fit_points_to_terrain(points, size_x, size_y)
+ main
     if len(points) < 2:
         _debug_log("track inlay skipped: not enough valid track points")
         return None, None
@@ -567,12 +616,35 @@ def main() -> None:
     groove, track_inlay = _create_track_inlay(job, terrain_for_layers)
     _stage_log("track", f"after track inlay creation groove={groove is not None} track={track_inlay is not None}")
     if groove is not None:
+ codex/fix-blender-runtime-geometry-crash-05cqpn
+        terrain_xy_guard = 1.03
+        track_dx = track_inlay.dimensions.x if track_inlay is not None else 0.0
+        track_dy = track_inlay.dimensions.y if track_inlay is not None else 0.0
+        track_dz = track_inlay.dimensions.z if track_inlay is not None else 0.0
+        groove_too_wide = groove.dimensions.x > (base.dimensions.x * terrain_xy_guard) or groove.dimensions.y > (base.dimensions.y * terrain_xy_guard)
+        track_too_wide = track_inlay is not None and (track_dx > (base.dimensions.x * terrain_xy_guard) or track_dy > (base.dimensions.y * terrain_xy_guard))
+        if groove_too_wide or track_too_wide:
+            _stage_log(
+                "track",
+                f"pre-boolean base_dims=({base.dimensions.x:.3f},{base.dimensions.y:.3f},{base.dimensions.z:.3f}) groove_dims=({groove.dimensions.x:.3f},{groove.dimensions.y:.3f},{groove.dimensions.z:.3f}) track_dims=({track_dx:.3f},{track_dy:.3f},{track_dz:.3f}) base_polys={len(base.data.polygons)} groove_polys={len(groove.data.polygons)} simplified=False skip_boolean=True reason=xy_oversize_after_fit",
+            )
+            bpy.data.objects.remove(groove, do_unlink=True)
+        else:
+            simplified = _simplify_mesh_for_boolean(groove, target_polys=280000)
+            _stage_log(
+                "track",
+                f"pre-boolean base_dims=({base.dimensions.x:.3f},{base.dimensions.y:.3f},{base.dimensions.z:.3f}) groove_dims=({groove.dimensions.x:.3f},{groove.dimensions.y:.3f},{groove.dimensions.z:.3f}) track_dims=({track_dx:.3f},{track_dy:.3f},{track_dz:.3f}) base_polys={len(base.data.polygons)} groove_polys={len(groove.data.polygons)} simplified={simplified} skip_boolean=False reason=ok",
+            )
+            _apply_boolean(base, groove, "DIFFERENCE")
+
+
         simplified = _simplify_mesh_for_boolean(groove, target_polys=280000)
         _stage_log(
             "track",
             f"pre-boolean base_dims=({base.dimensions.x:.3f},{base.dimensions.y:.3f},{base.dimensions.z:.3f}) groove_dims=({groove.dimensions.x:.3f},{groove.dimensions.y:.3f},{groove.dimensions.z:.3f}) base_polys={len(base.data.polygons)} groove_polys={len(groove.data.polygons)} simplified={simplified}",
         )
         _apply_boolean(base, groove, "DIFFERENCE")
+ main
 
     _stage_log("ams", "before AMS layer creation")
     water, green, detail = _build_ams_layers(job, terrain_for_layers)
