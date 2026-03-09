@@ -74,7 +74,6 @@ def _fit_points_to_terrain(points: list[tuple[float, float]], size_x: float, siz
     if len(points) < 2:
         return points, False
 
- main
     min_x = min(p[0] for p in points)
     max_x = max(p[0] for p in points)
     min_y = min(p[1] for p in points)
