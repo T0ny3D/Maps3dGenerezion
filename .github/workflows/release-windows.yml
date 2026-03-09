@@ -79,10 +79,25 @@ jobs:
           Write-Host "Test-Path maps3d_app\core\blender_backend.py"
           Test-Path "maps3d_app\core\blender_backend.py"
 
+
+      - name: Sanity check source for merge artifacts
+        shell: pwsh
+        run: |
+          $patterns = @('<<<<<<<', '=======', '>>>>>>>', 'codex/')
+          $hits = Get-ChildItem -Recurse -File -Include *.py | Select-String -Pattern $patterns
+          if ($hits) {
+            $hits | ForEach-Object { Write-Host "$($_.Path):$($_.LineNumber): $($_.Line)" }
+            throw "Merge artifact markers found in source files"
+          }
+
       - name: Build EXE (PyInstaller)
         shell: pwsh
         run: |
-          pyinstaller --noconfirm maps3dgen.spec
+          Write-Host "Cleaning stale build artifacts"
+          Remove-Item -Recurse -Force build, dist -ErrorAction SilentlyContinue
+          Get-ChildItem -Recurse -Directory -Filter "__pycache__" | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+
+          pyinstaller --clean --noconfirm maps3dgen.spec
 
           if (!(Test-Path "dist\Maps3DGen_NEW.exe")) { throw "EXE not found in dist\Maps3DGen_NEW.exe" }
 
