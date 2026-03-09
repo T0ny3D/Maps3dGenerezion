@@ -40,7 +40,18 @@ def _enable_smooth_shading(obj: bpy.types.Object) -> None:
 
 
 def _apply_boolean(base: bpy.types.Object, tool: bpy.types.Object, op: str) -> None:
-    _stage_log("boolean", f"start op={op} base={base.name} tool={tool.name} base_polys={len(base.data.polygons) if base.type=='MESH' and base.data else -1} tool_polys={len(tool.data.polygons) if tool.type=='MESH' and tool.data else -1}")
+    base_polys = len(base.data.polygons) if base.type == "MESH" and base.data else -1
+    tool_polys = len(tool.data.polygons) if tool.type == "MESH" and tool.data else -1
+    max_per_mesh = 900000
+    max_total = 1400000
+    if base_polys > max_per_mesh or tool_polys > max_per_mesh or (base_polys + tool_polys) > max_total:
+        _stage_log(
+            "boolean",
+            f"skip op={op} base={base.name} tool={tool.name} base_polys={base_polys} tool_polys={tool_polys} reason=density_guard",
+        )
+        bpy.data.objects.remove(tool, do_unlink=True)
+        return
+    _stage_log("boolean", f"start op={op} base={base.name} tool={tool.name} base_polys={base_polys} tool_polys={tool_polys}")
     mod = base.modifiers.new(name=f"Bool_{op}", type="BOOLEAN")
     mod.operation = op
     mod.solver = "EXACT"
@@ -53,6 +64,53 @@ def _apply_boolean(base: bpy.types.Object, tool: bpy.types.Object, op: str) -> N
 
 def _debug_log(message: str) -> None:
     print(f"[maps3d][track_inlay] {message}", flush=True)
+
+
+def _fit_points_to_terrain(points: list[tuple[float, float]], size_x: float, size_y: float) -> tuple[list[tuple[float, float]], bool]:
+    if len(points) < 2:
+        return points, False
+
+    min_x = min(p[0] for p in points)
+    max_x = max(p[0] for p in points)
+    min_y = min(p[1] for p in points)
+    max_y = max(p[1] for p in points)
+    span_x = max(1e-6, max_x - min_x)
+    span_y = max(1e-6, max_y - min_y)
+
+    overflow = span_x > (size_x * 1.02) or span_y > (size_y * 1.02)
+    if not overflow:
+        return points, False
+
+    sx = size_x / span_x
+    sy = size_y / span_y
+    scale = min(sx, sy)
+    src_cx = (min_x + max_x) * 0.5
+    src_cy = (min_y + max_y) * 0.5
+    dst_cx = size_x * 0.5
+    dst_cy = size_y * 0.5
+    out = [((x - src_cx) * scale + dst_cx, (y - src_cy) * scale + dst_cy) for (x, y) in points]
+    _debug_log(
+        f"track footprint normalized src_span=({span_x:.3f},{span_y:.3f}) terrain_span=({size_x:.3f},{size_y:.3f}) scale={scale:.6f}"
+    )
+    return out, True
+
+
+def _simplify_mesh_for_boolean(mesh_obj: bpy.types.Object, target_polys: int) -> bool:
+    if mesh_obj.type != "MESH" or mesh_obj.data is None:
+        return False
+    current = len(mesh_obj.data.polygons)
+    target = max(50000, int(target_polys))
+    if current <= target:
+        return False
+    ratio = max(0.02, min(1.0, target / float(current)))
+    dec = mesh_obj.modifiers.new(name="BoolPreDecimate", type="DECIMATE")
+    dec.ratio = ratio
+    dec.use_collapse_triangulate = True
+    _set_object_active_selected(mesh_obj)
+    bpy.ops.object.modifier_apply(modifier=dec.name)
+    after = len(mesh_obj.data.polygons)
+    _debug_log(f"boolean simplify object={mesh_obj.name} polys={current}->{after} target={target} ratio={ratio:.5f}")
+    return after < current
 
 
 def _resample_track(points: list[list[float]], step_mm: float = 1.0, max_points: int = 50000) -> list[tuple[float, float]]:
@@ -161,7 +219,7 @@ def _create_terrain(job: dict) -> bpy.types.Object:
 def _curve_from_points(points: list[tuple[float, float]], name: str) -> bpy.types.Object:
     cdata = bpy.data.curves.new(f"{name}Data", type="CURVE")
     cdata.dimensions = "3D"
-    cdata.resolution_u = 1 if len(points) > 5000 else 24
+    cdata.resolution_u = 1 if len(points) > 2000 else 6
     spline = cdata.splines.new(type="POLY")
     spline.points.add(len(points) - 1)
     for i, (x, y) in enumerate(points):
@@ -226,10 +284,11 @@ def _create_track_inlay(job: dict, terrain_top: bpy.types.Object) -> tuple[bpy.t
     size_x = abs(float(job.get("size_mm_x", 0.0)))
     size_y = abs(float(job.get("size_mm_y", 0.0)))
     perimeter_mm = max(1.0, 2.0 * (size_x + size_y))
-    max_track_points = min(120000, max(8000, int(perimeter_mm * 6.0)))
+    max_track_points = min(12000, max(1200, int(perimeter_mm * 2.0)))
 
     raw_track_points = job.get("track_points_mm", [])
     points = _resample_track(raw_track_points, 1.0, max_points=max_track_points)
+    points, normalized = _fit_points_to_terrain(points, size_x, size_y)
     if len(points) < 2:
         _debug_log("track inlay skipped: not enough valid track points")
         return None, None
@@ -246,7 +305,7 @@ def _create_track_inlay(job: dict, terrain_top: bpy.types.Object) -> tuple[bpy.t
 
     _debug_log(
         f"input raw_points={len(raw_track_points)} points={len(points)} terrain_dims=({terrain_top.dimensions.x:.3f},{terrain_top.dimensions.y:.3f},{terrain_top.dimensions.z:.3f}) "
-        f"groove_width={groove_width:.3f} groove_depth={groove_depth:.3f} track_width={track_width:.3f} total_h={total_h:.3f}"
+        f"groove_width={groove_width:.3f} groove_depth={groove_depth:.3f} track_width={track_width:.3f} total_h={total_h:.3f} normalized={normalized}"
     )
 
 
@@ -289,20 +348,6 @@ def _create_track_inlay(job: dict, terrain_top: bpy.types.Object) -> tuple[bpy.t
 
     _stage_log("track", f"creating track curve points={len(points)} track_width={track_width:.3f} total_h={total_h:.3f}")
 
-    bm = bmesh.new()
-    bm.from_mesh(groove_mesh.data)
-    bmesh.ops.bevel(
-        bm,
-        geom=list(bm.edges),
-        offset=max(0.05, min(groove_chamfer, groove_width * 0.2)),
-        segments=1,
-        profile=0.5,
-        affect="EDGES",
-        clamp_overlap=True,
-    )
-    bm.to_mesh(groove_mesh.data)
-    bm.free()
-
     track_curve = _curve_from_points(points, "TrackInlayCurve")
     sw2 = track_curve.modifiers.new(name="TrackSW", type="SHRINKWRAP")
     sw2.target = terrain_top
@@ -321,7 +366,7 @@ def _create_track_inlay(job: dict, terrain_top: bpy.types.Object) -> tuple[bpy.t
 
     bev = track_mesh.modifiers.new(name="TopRound", type="BEVEL")
     bev.width = max(0.05, min(top_radius, track_width * 0.45))
-    bev.segments = 3
+    bev.segments = 2
     bev.limit_method = "ANGLE"
 
 
@@ -522,6 +567,11 @@ def main() -> None:
     groove, track_inlay = _create_track_inlay(job, terrain_for_layers)
     _stage_log("track", f"after track inlay creation groove={groove is not None} track={track_inlay is not None}")
     if groove is not None:
+        simplified = _simplify_mesh_for_boolean(groove, target_polys=280000)
+        _stage_log(
+            "track",
+            f"pre-boolean base_dims=({base.dimensions.x:.3f},{base.dimensions.y:.3f},{base.dimensions.z:.3f}) groove_dims=({groove.dimensions.x:.3f},{groove.dimensions.y:.3f},{groove.dimensions.z:.3f}) base_polys={len(base.data.polygons)} groove_polys={len(groove.data.polygons)} simplified={simplified}",
+        )
         _apply_boolean(base, groove, "DIFFERENCE")
 
     _stage_log("ams", "before AMS layer creation")
