@@ -180,7 +180,11 @@ def _curve_to_mesh(curve_obj: bpy.types.Object, name: str) -> bpy.types.Object:
 
     bpy.data.objects.remove(curve_obj, do_unlink=True)
     _set_object_active_selected(mesh_obj)
+ codex/fix-blender-script-context-bug-r829ep
+ codex/fix-blender-script-context-bug-r829ep
+
  codex/fix-blender-script-context-bug-wf6niq
+ main
     _debug_log(
         f"mesh name={name} verts={len(mesh_obj.data.vertices)} edges={len(mesh_obj.data.edges)} polys={len(mesh_obj.data.polygons)} "
         f"dims=({mesh_obj.dimensions.x:.3f},{mesh_obj.dimensions.y:.3f},{mesh_obj.dimensions.z:.3f})"
@@ -233,7 +237,11 @@ def _create_track_inlay(job: dict, terrain_top: bpy.types.Object) -> tuple[bpy.t
     _set_object_active_selected(groove_curve)
     groove_mesh = _curve_to_mesh(groove_curve, "GrooveCurve")
 
+ codex/fix-blender-script-context-bug-r829ep
+ codex/fix-blender-script-context-bug-r829ep
+
  codex/fix-blender-script-context-bug-wf6niq
+ main
     edge_count = len(groove_mesh.data.edges)
     if edge_count > 250000:
         _debug_log(f"groove bevel skipped: excessive edge_count={edge_count}")
@@ -284,7 +292,11 @@ def _create_track_inlay(job: dict, terrain_top: bpy.types.Object) -> tuple[bpy.t
     bev.width = max(0.05, min(top_radius, track_width * 0.45))
     bev.segments = 3
     bev.limit_method = "ANGLE"
+ codex/fix-blender-script-context-bug-r829ep
+ codex/fix-blender-script-context-bug-r829ep
+
  codex/fix-blender-script-context-bug-wf6niq
+ main
     _debug_log(
         f"top bevel pre-apply verts={len(track_mesh.data.vertices)} edges={len(track_mesh.data.edges)} polys={len(track_mesh.data.polygons)} width={bev.width:.4f} segments={bev.segments}"
     )
