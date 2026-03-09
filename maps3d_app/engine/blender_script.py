@@ -204,10 +204,23 @@ def _curve_to_mesh(curve_obj: bpy.types.Object, name: str) -> bpy.types.Object:
 
     bpy.data.objects.remove(curve_obj, do_unlink=True)
     _set_object_active_selected(mesh_obj)
+ codex/fix-blender-script-context-bug-gigjou
+
+ codex/fix-blender-script-context-bug-r829ep
+ codex/fix-blender-script-context-bug-r829ep
+
+ codex/fix-blender-script-context-bug-wf6niq
+ main
+ main
     _debug_log(
         f"mesh name={name} verts={len(mesh_obj.data.vertices)} edges={len(mesh_obj.data.edges)} polys={len(mesh_obj.data.polygons)} "
         f"dims=({mesh_obj.dimensions.x:.3f},{mesh_obj.dimensions.y:.3f},{mesh_obj.dimensions.z:.3f})"
     )
+ codex/fix-blender-script-context-bug-gigjou
+
+
+ main
+ main
     return mesh_obj
 
 
@@ -241,7 +254,10 @@ def _create_track_inlay(job: dict, terrain_top: bpy.types.Object) -> tuple[bpy.t
         f"groove_width={groove_width:.3f} groove_depth={groove_depth:.3f} track_width={track_width:.3f} total_h={total_h:.3f}"
     )
 
+ codex/fix-blender-script-context-bug-gigjou
     _stage_log("track", f"creating groove curve points={len(points)} groove_width={groove_width:.3f} groove_depth={groove_depth:.3f}")
+
+ main
     groove_curve = _curve_from_points(points, "GrooveCurve")
     sw = groove_curve.modifiers.new(name="GrooveSW", type="SHRINKWRAP")
     sw.target = terrain_top
@@ -252,10 +268,21 @@ def _create_track_inlay(job: dict, terrain_top: bpy.types.Object) -> tuple[bpy.t
     groove_curve.data.bevel_depth = groove_width / 2.0
     groove_curve.data.fill_mode = "FULL"
     groove_curve.data.extrude = groove_depth
+ codex/fix-blender-script-context-bug-gigjou
     _stage_log("track", "before groove curve->mesh")
     _set_object_active_selected(groove_curve)
     groove_mesh = _curve_to_mesh(groove_curve, "GrooveCurve")
 
+
+    _set_object_active_selected(groove_curve)
+    groove_mesh = _curve_to_mesh(groove_curve, "GrooveCurve")
+
+ codex/fix-blender-script-context-bug-r829ep
+ codex/fix-blender-script-context-bug-r829ep
+
+ codex/fix-blender-script-context-bug-wf6niq
+ main
+ main
     edge_count = len(groove_mesh.data.edges)
     if edge_count > 250000:
         _debug_log(f"groove bevel skipped: excessive edge_count={edge_count}")
@@ -274,7 +301,25 @@ def _create_track_inlay(job: dict, terrain_top: bpy.types.Object) -> tuple[bpy.t
         bm.to_mesh(groove_mesh.data)
         bm.free()
 
+ codex/fix-blender-script-context-bug-gigjou
     _stage_log("track", f"creating track curve points={len(points)} track_width={track_width:.3f} total_h={total_h:.3f}")
+
+    bm = bmesh.new()
+    bm.from_mesh(groove_mesh.data)
+    bmesh.ops.bevel(
+        bm,
+        geom=list(bm.edges),
+        offset=max(0.05, min(groove_chamfer, groove_width * 0.2)),
+        segments=1,
+        profile=0.5,
+        affect="EDGES",
+        clamp_overlap=True,
+    )
+    bm.to_mesh(groove_mesh.data)
+    bm.free()
+ main
+
+ main
     track_curve = _curve_from_points(points, "TrackInlayCurve")
     sw2 = track_curve.modifiers.new(name="TrackSW", type="SHRINKWRAP")
     sw2.target = terrain_top
@@ -285,7 +330,10 @@ def _create_track_inlay(job: dict, terrain_top: bpy.types.Object) -> tuple[bpy.t
     track_curve.data.bevel_depth = track_width / 2.0
     track_curve.data.fill_mode = "FULL"
     track_curve.data.extrude = total_h
+ codex/fix-blender-script-context-bug-gigjou
     _stage_log("track", "before track curve->mesh")
+
+ main
     _set_object_active_selected(track_curve)
     track_mesh = _curve_to_mesh(track_curve, "TrackInlayCurve")
 
@@ -293,9 +341,22 @@ def _create_track_inlay(job: dict, terrain_top: bpy.types.Object) -> tuple[bpy.t
     bev.width = max(0.05, min(top_radius, track_width * 0.45))
     bev.segments = 3
     bev.limit_method = "ANGLE"
+ codex/fix-blender-script-context-bug-gigjou
     _debug_log(
         f"top bevel pre-apply verts={len(track_mesh.data.vertices)} edges={len(track_mesh.data.edges)} polys={len(track_mesh.data.polygons)} width={bev.width:.4f} segments={bev.segments}"
     )
+
+ codex/fix-blender-script-context-bug-r829ep
+ codex/fix-blender-script-context-bug-r829ep
+
+ codex/fix-blender-script-context-bug-wf6niq
+ main
+    _debug_log(
+        f"top bevel pre-apply verts={len(track_mesh.data.vertices)} edges={len(track_mesh.data.edges)} polys={len(track_mesh.data.polygons)} width={bev.width:.4f} segments={bev.segments}"
+    )
+
+ main
+ main
     _set_object_active_selected(track_mesh)
     bpy.ops.object.modifier_apply(modifier=bev.name)
     _debug_log(
