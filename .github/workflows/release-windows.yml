@@ -82,7 +82,11 @@ jobs:
       - name: Build EXE (PyInstaller)
         shell: pwsh
         run: |
-          pyinstaller --noconfirm maps3dgen.spec
+          Write-Host "Cleaning stale build artifacts"
+          Remove-Item -Recurse -Force build, dist -ErrorAction SilentlyContinue
+          Get-ChildItem -Recurse -Directory -Filter "__pycache__" | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+
+          pyinstaller --clean --noconfirm maps3dgen.spec
 
           if (!(Test-Path "dist\Maps3DGen_NEW.exe")) { throw "EXE not found in dist\Maps3DGen_NEW.exe" }
 
