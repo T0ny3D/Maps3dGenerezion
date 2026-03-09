@@ -9,6 +9,21 @@ import bmesh
 import bpy
 
 
+def _stage_log(stage: str, message: str) -> None:
+    print(f"[maps3d][stage] {stage}: {message}", flush=True)
+
+
+def _safe_int(raw: object, default: int, min_value: int, max_value: int, label: str) -> int:
+    try:
+        value = int(raw)
+    except Exception:
+        value = default
+    clamped = max(min_value, min(max_value, value))
+    if clamped != value:
+        _stage_log("guard", f"{label} clamped from {value} to {clamped}")
+    return clamped
+
+
 def _clear_scene() -> None:
     bpy.ops.object.select_all(action="SELECT")
     bpy.ops.object.delete(use_global=False)
@@ -25,12 +40,14 @@ def _enable_smooth_shading(obj: bpy.types.Object) -> None:
 
 
 def _apply_boolean(base: bpy.types.Object, tool: bpy.types.Object, op: str) -> None:
+    _stage_log("boolean", f"start op={op} base={base.name} tool={tool.name} base_polys={len(base.data.polygons) if base.type=='MESH' and base.data else -1} tool_polys={len(tool.data.polygons) if tool.type=='MESH' and tool.data else -1}")
     mod = base.modifiers.new(name=f"Bool_{op}", type="BOOLEAN")
     mod.operation = op
     mod.solver = "EXACT"
     mod.object = tool
     bpy.context.view_layer.objects.active = base
     bpy.ops.object.modifier_apply(modifier=mod.name)
+    _stage_log("boolean", f"end op={op} base_polys={len(base.data.polygons) if base.type=='MESH' and base.data else -1}")
     bpy.data.objects.remove(tool, do_unlink=True)
 
 
@@ -103,7 +120,9 @@ def _create_terrain(job: dict) -> bpy.types.Object:
     size_x = float(job["size_mm_x"])
     size_y = float(job["size_mm_y"])
     base_mm = float(job["base_mm"])
-    grid_res = max(2, int(job.get("grid_res", 400)))
+    grid_res = _safe_int(job.get("grid_res", 400), default=400, min_value=2, max_value=1600, label="grid_res")
+    est_vertices = grid_res * grid_res
+    _stage_log("terrain", f"begin size=({size_x:.3f},{size_y:.3f}) base_mm={base_mm:.3f} grid_res={grid_res} est_vertices={est_vertices}")
 
     bpy.ops.mesh.primitive_grid_add(x_subdivisions=grid_res, y_subdivisions=grid_res, size=1.0, location=(size_x / 2.0, size_y / 2.0, 0.0))
     terrain = bpy.context.active_object
@@ -111,7 +130,9 @@ def _create_terrain(job: dict) -> bpy.types.Object:
     terrain.scale = (size_x / 2.0, size_y / 2.0, 1.0)
     bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
 
+    _stage_log("terrain", f"loading heightmap path={job['heightmap_path']}")
     image = bpy.data.images.load(job["heightmap_path"])
+    _stage_log("terrain", f"heightmap size={image.size[0]}x{image.size[1]}")
     tex = bpy.data.textures.new("HeightmapTex", type="IMAGE")
     tex.image = image
 
@@ -121,16 +142,19 @@ def _create_terrain(job: dict) -> bpy.types.Object:
     displace.strength = float(job.get("z_scale", 1.0)) * float(job.get("z_range_mm", 0.0))
     displace.mid_level = 0.0
 
+    _stage_log("terrain", f"apply displace strength={displace.strength:.6f}")
     bpy.context.view_layer.objects.active = terrain
     bpy.ops.object.modifier_apply(modifier=displace.name)
     _apply_rim_flatten(terrain, size_x, size_y, float(job.get("rim_mm", 3.0)))
 
+    _stage_log("terrain", f"post-displace verts={len(terrain.data.vertices)} faces={len(terrain.data.polygons)}")
     solidify = terrain.modifiers.new(name="Solidify", type="SOLIDIFY")
     solidify.thickness = base_mm
     solidify.offset = -1.0
     bpy.ops.object.modifier_apply(modifier=solidify.name)
 
     _enable_smooth_shading(terrain)
+    _stage_log("terrain", f"end verts={len(terrain.data.vertices)} edges={len(terrain.data.edges)} polys={len(terrain.data.polygons)} dims=({terrain.dimensions.x:.3f},{terrain.dimensions.y:.3f},{terrain.dimensions.z:.3f})")
     return terrain
 
 
@@ -180,16 +204,22 @@ def _curve_to_mesh(curve_obj: bpy.types.Object, name: str) -> bpy.types.Object:
 
     bpy.data.objects.remove(curve_obj, do_unlink=True)
     _set_object_active_selected(mesh_obj)
+ codex/fix-blender-script-context-bug-gigjou
+
  codex/fix-blender-script-context-bug-r829ep
  codex/fix-blender-script-context-bug-r829ep
 
  codex/fix-blender-script-context-bug-wf6niq
  main
+ main
     _debug_log(
         f"mesh name={name} verts={len(mesh_obj.data.vertices)} edges={len(mesh_obj.data.edges)} polys={len(mesh_obj.data.polygons)} "
         f"dims=({mesh_obj.dimensions.x:.3f},{mesh_obj.dimensions.y:.3f},{mesh_obj.dimensions.z:.3f})"
     )
+ codex/fix-blender-script-context-bug-gigjou
 
+
+ main
  main
     return mesh_obj
 
@@ -224,6 +254,10 @@ def _create_track_inlay(job: dict, terrain_top: bpy.types.Object) -> tuple[bpy.t
         f"groove_width={groove_width:.3f} groove_depth={groove_depth:.3f} track_width={track_width:.3f} total_h={total_h:.3f}"
     )
 
+ codex/fix-blender-script-context-bug-gigjou
+    _stage_log("track", f"creating groove curve points={len(points)} groove_width={groove_width:.3f} groove_depth={groove_depth:.3f}")
+
+ main
     groove_curve = _curve_from_points(points, "GrooveCurve")
     sw = groove_curve.modifiers.new(name="GrooveSW", type="SHRINKWRAP")
     sw.target = terrain_top
@@ -234,6 +268,12 @@ def _create_track_inlay(job: dict, terrain_top: bpy.types.Object) -> tuple[bpy.t
     groove_curve.data.bevel_depth = groove_width / 2.0
     groove_curve.data.fill_mode = "FULL"
     groove_curve.data.extrude = groove_depth
+ codex/fix-blender-script-context-bug-gigjou
+    _stage_log("track", "before groove curve->mesh")
+    _set_object_active_selected(groove_curve)
+    groove_mesh = _curve_to_mesh(groove_curve, "GrooveCurve")
+
+
     _set_object_active_selected(groove_curve)
     groove_mesh = _curve_to_mesh(groove_curve, "GrooveCurve")
 
@@ -241,6 +281,7 @@ def _create_track_inlay(job: dict, terrain_top: bpy.types.Object) -> tuple[bpy.t
  codex/fix-blender-script-context-bug-r829ep
 
  codex/fix-blender-script-context-bug-wf6niq
+ main
  main
     edge_count = len(groove_mesh.data.edges)
     if edge_count > 250000:
@@ -260,6 +301,9 @@ def _create_track_inlay(job: dict, terrain_top: bpy.types.Object) -> tuple[bpy.t
         bm.to_mesh(groove_mesh.data)
         bm.free()
 
+ codex/fix-blender-script-context-bug-gigjou
+    _stage_log("track", f"creating track curve points={len(points)} track_width={track_width:.3f} total_h={total_h:.3f}")
+
     bm = bmesh.new()
     bm.from_mesh(groove_mesh.data)
     bmesh.ops.bevel(
@@ -275,6 +319,7 @@ def _create_track_inlay(job: dict, terrain_top: bpy.types.Object) -> tuple[bpy.t
     bm.free()
  main
 
+ main
     track_curve = _curve_from_points(points, "TrackInlayCurve")
     sw2 = track_curve.modifiers.new(name="TrackSW", type="SHRINKWRAP")
     sw2.target = terrain_top
@@ -285,6 +330,10 @@ def _create_track_inlay(job: dict, terrain_top: bpy.types.Object) -> tuple[bpy.t
     track_curve.data.bevel_depth = track_width / 2.0
     track_curve.data.fill_mode = "FULL"
     track_curve.data.extrude = total_h
+ codex/fix-blender-script-context-bug-gigjou
+    _stage_log("track", "before track curve->mesh")
+
+ main
     _set_object_active_selected(track_curve)
     track_mesh = _curve_to_mesh(track_curve, "TrackInlayCurve")
 
@@ -292,6 +341,11 @@ def _create_track_inlay(job: dict, terrain_top: bpy.types.Object) -> tuple[bpy.t
     bev.width = max(0.05, min(top_radius, track_width * 0.45))
     bev.segments = 3
     bev.limit_method = "ANGLE"
+ codex/fix-blender-script-context-bug-gigjou
+    _debug_log(
+        f"top bevel pre-apply verts={len(track_mesh.data.vertices)} edges={len(track_mesh.data.edges)} polys={len(track_mesh.data.polygons)} width={bev.width:.4f} segments={bev.segments}"
+    )
+
  codex/fix-blender-script-context-bug-r829ep
  codex/fix-blender-script-context-bug-r829ep
 
@@ -301,6 +355,7 @@ def _create_track_inlay(job: dict, terrain_top: bpy.types.Object) -> tuple[bpy.t
         f"top bevel pre-apply verts={len(track_mesh.data.vertices)} edges={len(track_mesh.data.edges)} polys={len(track_mesh.data.polygons)} width={bev.width:.4f} segments={bev.segments}"
     )
 
+ main
  main
     _set_object_active_selected(track_mesh)
     bpy.ops.object.modifier_apply(modifier=bev.name)
@@ -453,6 +508,7 @@ def _create_test_frame_corner(job: dict) -> bpy.types.Object:
 
 def _export_stl(obj: bpy.types.Object | None, path: Path) -> None:
     if obj is None:
+        _stage_log("export", f"skip none object -> {path}")
         return
     path.parent.mkdir(parents=True, exist_ok=True)
     bpy.ops.object.select_all(action="DESELECT")
@@ -462,10 +518,15 @@ def _export_stl(obj: bpy.types.Object | None, path: Path) -> None:
 
 
 def main() -> None:
+    _stage_log("startup", f"argv={sys.argv}")
     if "--" not in sys.argv:
         raise RuntimeError("Percorso job.json mancante")
 
-    job = json.loads(Path(sys.argv[sys.argv.index("--") + 1]).read_text(encoding="utf-8"))
+    job_path = Path(sys.argv[sys.argv.index("--") + 1])
+    _stage_log("job", f"loading job json from {job_path}")
+    raw_job = job_path.read_text(encoding="utf-8")
+    job = json.loads(raw_job)
+    _stage_log("job", f"job loaded keys={len(job.keys())} track_points={len(job.get('track_points_mm', []))} size=({job.get('size_mm_x')},{job.get('size_mm_y')})")
     out_base = Path(job.get("out_base_stl_path", "base_brown.stl"))
     out_water = Path(job.get("out_water_stl_path", "water.stl"))
     out_green = Path(job.get("out_green_stl_path", "green.stl"))
@@ -474,18 +535,25 @@ def main() -> None:
     out_frame = Path(job.get("out_frame_stl_path", "frame.stl"))
 
     bpy.context.scene.unit_settings.system = "NONE"
+    _stage_log("scene", "clearing scene")
     _clear_scene()
 
+    _stage_log("terrain", "before terrain creation")
     base = _create_terrain(job)
+    _stage_log("terrain", f"after terrain creation base={base.name} polys={len(base.data.polygons)}")
     terrain_for_layers = base.copy()
     terrain_for_layers.data = base.data.copy()
     bpy.context.collection.objects.link(terrain_for_layers)
 
+    _stage_log("track", "before track inlay creation")
     groove, track_inlay = _create_track_inlay(job, terrain_for_layers)
+    _stage_log("track", f"after track inlay creation groove={groove is not None} track={track_inlay is not None}")
     if groove is not None:
         _apply_boolean(base, groove, "DIFFERENCE")
 
+    _stage_log("ams", "before AMS layer creation")
     water, green, detail = _build_ams_layers(job, terrain_for_layers)
+    _stage_log("ams", f"after AMS layer creation water={water is not None} green={green is not None} detail={detail is not None}")
 
     if bool(job.get("test_mode", False)):
         ts = float(job.get("test_size_mm", 40.0))
@@ -501,16 +569,25 @@ def main() -> None:
         if track_inlay is not None:
             track_inlay = _make_test_map(track_inlay, ts, sx, sy)
 
+    _stage_log("export", f"exporting base -> {out_base}")
     _export_stl(base, out_base)
+    _stage_log("export", f"exporting water -> {out_water}")
     _export_stl(water, out_water)
+    _stage_log("export", f"exporting green -> {out_green}")
     _export_stl(green, out_green)
+    _stage_log("export", f"exporting detail -> {out_detail}")
     _export_stl(detail, out_detail)
+    _stage_log("export", f"exporting track -> {out_track}")
     _export_stl(track_inlay, out_track)
 
     if bool(job.get("separate_frame", True)):
+        _stage_log("frame", "before frame creation")
         frame_obj = _create_test_frame_corner(job) if bool(job.get("test_mode", False)) else _create_frame(job)
+        _stage_log("frame", f"after frame creation polys={len(frame_obj.data.polygons) if frame_obj and frame_obj.type=='MESH' else -1}")
+        _stage_log("export", f"exporting frame -> {out_frame}")
         _export_stl(frame_obj, out_frame)
 
 
 if __name__ == "__main__":
+    _stage_log("startup", "blender_script module entry")
     main()
