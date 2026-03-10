@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 from pathlib import Path
+from urllib.parse import urlencode
+from urllib.request import urlopen
 
 import numpy as np
 import rasterio
@@ -10,7 +13,11 @@ import trimesh
 from shapely.geometry import GeometryCollection, LineString, MultiLineString, box
 
 from .gpx_loader import load_gpx_points
+ codex/transition-to-python-based-stl-generation-pipeline-d8wahe
+from .mesh_builder import build_line_layer_mesh, build_terrain_mesh
+
 from .mesh_builder import build_terrain_mesh, build_track_mesh
+ main
 from .model_space import ModelSpace
 
 _WGS84_GEOD = Geod(ellps="WGS84")
@@ -103,11 +110,28 @@ def _compute_bbox(points: np.ndarray, margin_ratio: float) -> tuple[float, float
     return minx - mx, miny - my, maxx + mx, maxy + my
 
 
+ codex/transition-to-python-based-stl-generation-pipeline-d8wahe
+def _python_output_paths(stl_output_path: str | Path, test_mode: bool) -> dict[str, Path]:
+
 def _python_output_paths(stl_output_path: str | Path, test_mode: bool) -> tuple[Path, Path, Path]:
+ main
     out = Path(stl_output_path)
     suffix = "_test" if test_mode else ""
     stem = out.stem
     parent = out.parent
+ codex/transition-to-python-based-stl-generation-pipeline-d8wahe
+    return {
+        "base": parent / f"{stem}{suffix}_base_brown.stl",
+        "water": parent / f"{stem}{suffix}_water.stl",
+        "green": parent / f"{stem}{suffix}_green.stl",
+        "detail": parent / f"{stem}{suffix}_detail.stl",
+        "track": parent / f"{stem}{suffix}_track_inlay_red.stl",
+        "combined": out,
+    }
+
+
+def _clip_polyline_to_footprint(track_xy_mm: np.ndarray, model_width_mm: float, model_height_mm: float) -> list[np.ndarray]:
+
     base_path = parent / f"{stem}{suffix}_base_brown.stl"
     track_path = parent / f"{stem}{suffix}_track_inlay_red.stl"
     combined_path = out
@@ -115,6 +139,7 @@ def _python_output_paths(stl_output_path: str | Path, test_mode: bool) -> tuple[
 
 
 def _clip_track_to_footprint(track_xy_mm: np.ndarray, model_width_mm: float, model_height_mm: float) -> list[np.ndarray]:
+ main
     if len(track_xy_mm) < 2:
         return []
 
@@ -142,6 +167,60 @@ def _clip_track_to_footprint(track_xy_mm: np.ndarray, model_width_mm: float, mod
     return _extract_segments(clipped)
 
 
+ codex/transition-to-python-based-stl-generation-pipeline-d8wahe
+def _fetch_osm_line_layers(points_lonlat: np.ndarray, to_dem: Transformer, model_space: ModelSpace) -> dict[str, list[np.ndarray]]:
+    min_lon = float(np.min(points_lonlat[:, 0]))
+    min_lat = float(np.min(points_lonlat[:, 1]))
+    max_lon = float(np.max(points_lonlat[:, 0]))
+    max_lat = float(np.max(points_lonlat[:, 1]))
+
+    pad_lon = (max_lon - min_lon) * 0.12 + 1e-4
+    pad_lat = (max_lat - min_lat) * 0.12 + 1e-4
+    s, w, n, e = min_lat - pad_lat, min_lon - pad_lon, max_lat + pad_lat, max_lon + pad_lon
+
+    q = f"""
+[out:json][timeout:25];
+(
+  way["natural"="water"]({s},{w},{n},{e});
+  way["waterway"]({s},{w},{n},{e});
+  way["landuse"~"forest|meadow|grass"]({s},{w},{n},{e});
+  way["leisure"~"park|garden"]({s},{w},{n},{e});
+  way["highway"~"motorway|trunk|primary|secondary"]({s},{w},{n},{e});
+);
+out geom;
+"""
+    layers = {"water": [], "green": [], "detail": []}
+
+    url = "https://overpass-api.de/api/interpreter?" + urlencode({"data": q})
+    try:
+        payload = json.loads(urlopen(url, timeout=30).read().decode("utf-8"))
+    except Exception:
+        return layers
+
+    for el in payload.get("elements", []):
+        geom = el.get("geometry", [])
+        if len(geom) < 2:
+            continue
+
+        lons = [float(p["lon"]) for p in geom]
+        lats = [float(p["lat"]) for p in geom]
+        xs_dem, ys_dem = to_dem.transform(lons, lats)
+        src_xy = np.column_stack((np.asarray(xs_dem, dtype=np.float64), np.asarray(ys_dem, dtype=np.float64)))
+        model_xy = model_space.to_model_xy(src_xy)
+
+        tags = el.get("tags", {})
+        if tags.get("natural") == "water" or "waterway" in tags:
+            layers["water"].append(model_xy)
+        elif tags.get("landuse") in {"forest", "meadow", "grass"} or tags.get("leisure") in {"park", "garden"}:
+            layers["green"].append(model_xy)
+        elif tags.get("highway") in {"motorway", "trunk", "primary", "secondary"}:
+            layers["detail"].append(model_xy)
+
+    return layers
+
+
+
+ main
 def run_python_pipeline(
     gpx_path: str | Path,
     dem_path: str | Path,
@@ -209,6 +288,45 @@ def run_python_pipeline(
         z_mm = (dem - min_elev) * horiz_scale_mm_per_meter * config.vertical_scale
 
         track_xy_mm = model_space.to_model_xy(points_dem)
+ codex/transition-to-python-based-stl-generation-pipeline-d8wahe
+        osm_layers = _fetch_osm_line_layers(points_lonlat, to_dem=to_dem, model_space=model_space)
+
+    terrain_mesh = build_terrain_mesh(x_mm=x_mm, y_mm=y_mm, z_mm=z_mm, base_thickness_mm=config.base_thickness_mm)
+
+    clipped_track_segments = _clip_polyline_to_footprint(track_xy_mm, config.model_width_mm, config.model_height_mm)
+    track_mesh = build_line_layer_mesh(
+        line_segments_xy_mm=clipped_track_segments,
+        x_mm=x_mm,
+        y_mm=y_mm,
+        z_mm=z_mm,
+        layer_height_mm=config.track_height_mm,
+        layer_width_mm=1.2,
+    )
+
+    clipped_water_segments = [
+        seg
+        for src in osm_layers["water"]
+        for seg in _clip_polyline_to_footprint(src, config.model_width_mm, config.model_height_mm)
+    ]
+    clipped_green_segments = [
+        seg
+        for src in osm_layers["green"]
+        for seg in _clip_polyline_to_footprint(src, config.model_width_mm, config.model_height_mm)
+    ]
+    clipped_detail_segments = [
+        seg
+        for src in osm_layers["detail"]
+        for seg in _clip_polyline_to_footprint(src, config.model_width_mm, config.model_height_mm)
+    ]
+
+    water_mesh = build_line_layer_mesh(
+        line_segments_xy_mm=clipped_water_segments,
+        x_mm=x_mm,
+        y_mm=y_mm,
+        z_mm=z_mm,
+        layer_height_mm=0.7,
+        layer_width_mm=1.8,
+
 
     terrain_mesh = build_terrain_mesh(x_mm=x_mm, y_mm=y_mm, z_mm=z_mm, base_thickness_mm=config.base_thickness_mm)
 
@@ -228,7 +346,48 @@ def run_python_pipeline(
         trimesh.util.concatenate(track_segments)
         if track_segments
         else trimesh.Trimesh(vertices=np.zeros((0, 3)), faces=np.zeros((0, 3), dtype=np.int64), process=False)
+ main
     )
+    green_mesh = build_line_layer_mesh(
+        line_segments_xy_mm=clipped_green_segments,
+        x_mm=x_mm,
+        y_mm=y_mm,
+        z_mm=z_mm,
+        layer_height_mm=0.5,
+        layer_width_mm=1.4,
+    )
+    detail_mesh = build_line_layer_mesh(
+        line_segments_xy_mm=clipped_detail_segments,
+        x_mm=x_mm,
+        y_mm=y_mm,
+        z_mm=z_mm,
+        layer_height_mm=0.4,
+        layer_width_mm=0.9,
+    )
+
+    if terrain_mesh.faces.shape[0] == 0:
+        raise ValueError("Mesh base vuota, impossibile esportare STL.")
+
+    out_paths = _python_output_paths(stl_output_path, config.test_mode)
+    out_paths["base"].parent.mkdir(parents=True, exist_ok=True)
+
+ codex/transition-to-python-based-stl-generation-pipeline-d8wahe
+    terrain_mesh.export(out_paths["base"])
+    if track_mesh.faces.shape[0] > 0:
+        track_mesh.export(out_paths["track"])
+    if water_mesh.faces.shape[0] > 0:
+        water_mesh.export(out_paths["water"])
+    if green_mesh.faces.shape[0] > 0:
+        green_mesh.export(out_paths["green"])
+    if detail_mesh.faces.shape[0] > 0:
+        detail_mesh.export(out_paths["detail"])
+
+    combined_meshes = [terrain_mesh]
+    for mesh in (track_mesh, water_mesh, green_mesh, detail_mesh):
+        if mesh.faces.shape[0] > 0:
+            combined_meshes.append(mesh)
+    final_mesh = trimesh.util.concatenate(combined_meshes)
+    final_mesh.export(out_paths["combined"])
 
     if terrain_mesh.faces.shape[0] == 0:
         raise ValueError("Mesh base vuota, impossibile esportare STL.")
@@ -243,6 +402,7 @@ def run_python_pipeline(
     combined_meshes = [terrain_mesh] + ([track_mesh] if track_mesh.faces.shape[0] > 0 else [])
     final_mesh = trimesh.util.concatenate(combined_meshes)
     final_mesh.export(out_combined)
+ main
 
 
 def run_pipeline(
