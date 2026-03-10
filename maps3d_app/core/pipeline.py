@@ -1,15 +1,20 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 from pathlib import Path
+from urllib.parse import urlencode
+from urllib.request import urlopen
 
 import numpy as np
 import rasterio
 from pyproj import Geod, Transformer
 import trimesh
+from shapely.geometry import GeometryCollection, LineString, MultiLineString, box
 
 from .gpx_loader import load_gpx_points
-from .mesh_builder import build_terrain_mesh, build_track_mesh
+from .mesh_builder import build_line_layer_mesh, build_rect_frame_mesh, build_terrain_mesh
+from .model_space import ModelSpace
 
 _WGS84_GEOD = Geod(ellps="WGS84")
 
@@ -101,6 +106,111 @@ def _compute_bbox(points: np.ndarray, margin_ratio: float) -> tuple[float, float
     return minx - mx, miny - my, maxx + mx, maxy + my
 
 
+def _python_output_paths(stl_output_path: str | Path, test_mode: bool) -> dict[str, Path]:
+    out = Path(stl_output_path)
+    suffix = "_test" if test_mode else ""
+    stem = out.stem
+    parent = out.parent
+    return {
+        "base": parent / f"{stem}{suffix}_base_brown.stl",
+        "water": parent / f"{stem}{suffix}_water.stl",
+        "green": parent / f"{stem}{suffix}_green.stl",
+        "detail": parent / f"{stem}{suffix}_detail.stl",
+        "track": parent / f"{stem}{suffix}_track_inlay_red.stl",
+        "frame": parent / f"{stem}{suffix}_frame.stl",
+        "combined": out,
+    }
+
+
+def _clip_polyline_to_footprint(track_xy_mm: np.ndarray, model_width_mm: float, model_height_mm: float) -> list[np.ndarray]:
+    if len(track_xy_mm) < 2:
+        return []
+
+    footprint = box(0.0, 0.0, model_width_mm, model_height_mm)
+    clipped = LineString(track_xy_mm).intersection(footprint)
+
+    def _extract_segments(geom: object) -> list[np.ndarray]:
+        if isinstance(geom, LineString):
+            coords = np.asarray(geom.coords, dtype=np.float64)
+            return [coords] if len(coords) >= 2 else []
+        if isinstance(geom, MultiLineString):
+            segs: list[np.ndarray] = []
+            for line in geom.geoms:
+                coords = np.asarray(line.coords, dtype=np.float64)
+                if len(coords) >= 2:
+                    segs.append(coords)
+            return segs
+        if isinstance(geom, GeometryCollection):
+            segs: list[np.ndarray] = []
+            for child in geom.geoms:
+                segs.extend(_extract_segments(child))
+            return segs
+        return []
+
+    return _extract_segments(clipped)
+
+
+def _fetch_osm_line_layers(points_lonlat: np.ndarray, to_dem: Transformer, model_space: ModelSpace) -> dict[str, list[np.ndarray]]:
+    min_lon = float(np.min(points_lonlat[:, 0]))
+    min_lat = float(np.min(points_lonlat[:, 1]))
+    max_lon = float(np.max(points_lonlat[:, 0]))
+    max_lat = float(np.max(points_lonlat[:, 1]))
+
+    pad_lon = (max_lon - min_lon) * 0.12 + 1e-4
+    pad_lat = (max_lat - min_lat) * 0.12 + 1e-4
+    s, w, n, e = min_lat - pad_lat, min_lon - pad_lon, max_lat + pad_lat, max_lon + pad_lon
+
+    q = f"""
+[out:json][timeout:25];
+(
+  way["natural"="water"]({s},{w},{n},{e});
+  way["waterway"]({s},{w},{n},{e});
+  way["landuse"~"forest|meadow|grass"]({s},{w},{n},{e});
+  way["leisure"~"park|garden"]({s},{w},{n},{e});
+  way["highway"~"motorway|trunk|primary|secondary"]({s},{w},{n},{e});
+);
+out geom;
+"""
+    layers = {"water": [], "green": [], "detail": []}
+
+    url = "https://overpass-api.de/api/interpreter?" + urlencode({"data": q})
+    try:
+        payload = json.loads(urlopen(url, timeout=30).read().decode("utf-8"))
+    except Exception:
+        return layers
+
+    for el in payload.get("elements", []):
+        geom = el.get("geometry", [])
+        if len(geom) < 2:
+            continue
+
+        lons = [float(p["lon"]) for p in geom]
+        lats = [float(p["lat"]) for p in geom]
+        xs_dem, ys_dem = to_dem.transform(lons, lats)
+        src_xy = np.column_stack((np.asarray(xs_dem, dtype=np.float64), np.asarray(ys_dem, dtype=np.float64)))
+        model_xy = model_space.to_model_xy(src_xy)
+
+        tags = el.get("tags", {})
+        if tags.get("natural") == "water" or "waterway" in tags:
+            layers["water"].append(model_xy)
+        elif tags.get("landuse") in {"forest", "meadow", "grass"} or tags.get("leisure") in {"park", "garden"}:
+            layers["green"].append(model_xy)
+        elif tags.get("highway") in {"motorway", "trunk", "primary", "secondary"}:
+            layers["detail"].append(model_xy)
+
+    return layers
+
+
+
+
+def _export_mesh_or_remove(path: Path, mesh: trimesh.Trimesh) -> None:
+    if mesh.faces.shape[0] > 0:
+        mesh.export(path)
+        return
+    if path.exists():
+        path.unlink()
+
+
 def run_python_pipeline(
     gpx_path: str | Path,
     dem_path: str | Path,
@@ -144,37 +254,117 @@ def run_python_pipeline(
 
         x_min, x_max = float(np.min(x_coords)), float(np.max(x_coords))
         y_min, y_max = float(np.min(y_coords)), float(np.max(y_coords))
-        dx = max(abs(x_max - x_min), 1e-6)
-        dy = max(abs(y_max - y_min), 1e-6)
 
-        x_mm = (x_coords - min(x_min, x_max)) / dx * config.model_width_mm
-        y_mm = (y_coords - min(y_min, y_max)) / dy * config.model_height_mm
-        y_mm = np.sort(y_mm)
-        if y_coords[0] > y_coords[-1]:
+        model_space = ModelSpace.from_source_bounds(
+            src_min_x=x_min,
+            src_max_x=x_max,
+            src_min_y=y_min,
+            src_max_y=y_max,
+            model_width_mm=config.model_width_mm,
+            model_height_mm=config.model_height_mm,
+        )
+
+        x_mm = model_space.to_model_x(x_coords)
+        y_mm = model_space.to_model_y(y_coords)
+
+        if x_mm[0] > x_mm[-1]:
+            x_mm = x_mm[::-1]
+            dem = np.fliplr(dem)
+        if y_mm[0] > y_mm[-1]:
+            y_mm = y_mm[::-1]
             dem = np.flipud(dem)
 
         horiz_scale_mm_per_meter = _model_horizontal_scale_mm_per_meter(ds, window, config.model_width_mm, config.model_height_mm)
         z_mm = (dem - min_elev) * horiz_scale_mm_per_meter * config.vertical_scale
 
-        track_x_mm = (points_dem[:, 0] - min(x_min, x_max)) / dx * config.model_width_mm
-        track_y_mm = (points_dem[:, 1] - min(y_min, y_max)) / dy * config.model_height_mm
-        track_xy_mm = np.column_stack((track_x_mm, track_y_mm))
+        track_xy_mm = model_space.to_model_xy(points_dem)
+        osm_layers = _fetch_osm_line_layers(points_lonlat, to_dem=to_dem, model_space=model_space)
 
     terrain_mesh = build_terrain_mesh(x_mm=x_mm, y_mm=y_mm, z_mm=z_mm, base_thickness_mm=config.base_thickness_mm)
-    track_mesh = build_track_mesh(
-        track_xy_mm=track_xy_mm,
+
+    clipped_track_segments = _clip_polyline_to_footprint(track_xy_mm, config.model_width_mm, config.model_height_mm)
+    track_mesh = build_line_layer_mesh(
+        line_segments_xy_mm=clipped_track_segments,
         x_mm=x_mm,
         y_mm=y_mm,
         z_mm=z_mm,
-        track_height_mm=config.track_height_mm,
+        layer_height_mm=config.track_height_mm,
+        layer_width_mm=1.2,
     )
 
-    final_mesh = trimesh.util.concatenate([terrain_mesh, track_mesh])
-    if final_mesh.faces.shape[0] == 0:
-        raise ValueError("Mesh vuota, impossibile esportare STL.")
+    clipped_water_segments = [
+        seg
+        for src in osm_layers["water"]
+        for seg in _clip_polyline_to_footprint(src, config.model_width_mm, config.model_height_mm)
+    ]
+    clipped_green_segments = [
+        seg
+        for src in osm_layers["green"]
+        for seg in _clip_polyline_to_footprint(src, config.model_width_mm, config.model_height_mm)
+    ]
+    clipped_detail_segments = [
+        seg
+        for src in osm_layers["detail"]
+        for seg in _clip_polyline_to_footprint(src, config.model_width_mm, config.model_height_mm)
+    ]
 
-    Path(stl_output_path).parent.mkdir(parents=True, exist_ok=True)
-    final_mesh.export(stl_output_path)
+    water_mesh = build_line_layer_mesh(
+        line_segments_xy_mm=clipped_water_segments,
+        x_mm=x_mm,
+        y_mm=y_mm,
+        z_mm=z_mm,
+        layer_height_mm=0.7,
+        layer_width_mm=1.8,
+    )
+    green_mesh = build_line_layer_mesh(
+        line_segments_xy_mm=clipped_green_segments,
+        x_mm=x_mm,
+        y_mm=y_mm,
+        z_mm=z_mm,
+        layer_height_mm=0.5,
+        layer_width_mm=1.4,
+    )
+    detail_mesh = build_line_layer_mesh(
+        line_segments_xy_mm=clipped_detail_segments,
+        x_mm=x_mm,
+        y_mm=y_mm,
+        z_mm=z_mm,
+        layer_height_mm=0.4,
+        layer_width_mm=0.9,
+    )
+
+    frame_mesh = (
+        build_rect_frame_mesh(
+            model_width_mm=config.model_width_mm,
+            model_height_mm=config.model_height_mm,
+            frame_wall_mm=config.frame_wall_mm,
+            frame_height_mm=config.frame_height_mm,
+            clearance_mm=config.clearance_mm,
+            base_thickness_mm=config.base_thickness_mm,
+        )
+        if config.separate_frame
+        else trimesh.Trimesh(vertices=np.zeros((0, 3)), faces=np.zeros((0, 3), dtype=np.int64), process=False)
+    )
+
+    if terrain_mesh.faces.shape[0] == 0:
+        raise ValueError("Mesh base vuota, impossibile esportare STL.")
+
+    out_paths = _python_output_paths(stl_output_path, config.test_mode)
+    out_paths["base"].parent.mkdir(parents=True, exist_ok=True)
+
+    _export_mesh_or_remove(out_paths["base"], terrain_mesh)
+    _export_mesh_or_remove(out_paths["track"], track_mesh)
+    _export_mesh_or_remove(out_paths["water"], water_mesh)
+    _export_mesh_or_remove(out_paths["green"], green_mesh)
+    _export_mesh_or_remove(out_paths["detail"], detail_mesh)
+    _export_mesh_or_remove(out_paths["frame"], frame_mesh)
+
+    combined_meshes = [terrain_mesh]
+    for mesh in (track_mesh, water_mesh, green_mesh, detail_mesh):
+        if mesh.faces.shape[0] > 0:
+            combined_meshes.append(mesh)
+    final_mesh = trimesh.util.concatenate(combined_meshes)
+    final_mesh.export(out_paths["combined"])
 
 
 def run_pipeline(
@@ -182,7 +372,7 @@ def run_pipeline(
     dem_path: str | Path,
     stl_output_path: str | Path,
     config: GenerateConfig,
-    backend: str = "blender",
+    backend: str = "python",
     blender_exe_path: str | None = None,
 ) -> None:
     backend_norm = backend.strip().lower()
