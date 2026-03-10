@@ -168,6 +168,7 @@ def build_line_layer_mesh(
         return trimesh.Trimesh(vertices=np.zeros((0, 3)), faces=np.zeros((0, 3), dtype=np.int64), process=False)
 
     return trimesh.util.concatenate(meshes)
+ codex/transition-to-python-based-stl-generation-pipeline-3fu0a3
 
 
 
@@ -206,3 +207,5 @@ def build_rect_frame_mesh(
     ]
 
     return trimesh.util.concatenate(parts)
+
+ main
