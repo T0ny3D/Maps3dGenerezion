@@ -70,10 +70,6 @@ def _points_bbox(points: list[tuple[float, float]]) -> tuple[float, float, float
     if not points:
         return 0.0, 0.0, 0.0, 0.0
 
-def _fit_points_to_terrain(points: list[tuple[float, float]], size_x: float, size_y: float) -> tuple[list[tuple[float, float]], bool]:
-    if len(points) < 2:
-        return points, False
-
     min_x = min(p[0] for p in points)
     max_x = max(p[0] for p in points)
     min_y = min(p[1] for p in points)
@@ -81,7 +77,9 @@ def _fit_points_to_terrain(points: list[tuple[float, float]], size_x: float, siz
     return min_x, max_x, min_y, max_y
 
 
-def _fit_points_to_terrain(points: list[tuple[float, float]], size_x: float, size_y: float) -> tuple[list[tuple[float, float]], bool, str]:
+def _fit_points_to_terrain(
+    points: list[tuple[float, float]], size_x: float, size_y: float
+) -> tuple[list[tuple[float, float]], bool, str]:
     if len(points) < 2:
         return points, False, "insufficient_points"
 
@@ -90,8 +88,14 @@ def _fit_points_to_terrain(points: list[tuple[float, float]], size_x: float, siz
     span_y = max(1e-6, max_y - min_y)
     terrain_span_x = max(1e-6, float(size_x))
     terrain_span_y = max(1e-6, float(size_y))
+
     span_overflow = span_x > (terrain_span_x * 1.01) or span_y > (terrain_span_y * 1.01)
-    bounds_overflow = min_x < -0.5 or min_y < -0.5 or max_x > (terrain_span_x + 0.5) or max_y > (terrain_span_y + 0.5)
+    bounds_overflow = (
+        min_x < -0.5
+        or min_y < -0.5
+        or max_x > (terrain_span_x + 0.5)
+        or max_y > (terrain_span_y + 0.5)
+    )
     need_fit = span_overflow or bounds_overflow
     reason = "span_overflow" if span_overflow else ("out_of_bounds" if bounds_overflow else "within_bounds")
 
@@ -106,28 +110,12 @@ def _fit_points_to_terrain(points: list[tuple[float, float]], size_x: float, siz
     dst_cx = terrain_span_x * 0.5
     dst_cy = terrain_span_y * 0.5
     out = [((x - src_cx) * scale + dst_cx, (y - src_cy) * scale + dst_cy) for (x, y) in points]
-    return out, True, reason
 
-    span_x = max(1e-6, max_x - min_x)
-    span_y = max(1e-6, max_y - min_y)
-
-    overflow = span_x > (size_x * 1.02) or span_y > (size_y * 1.02)
-    if not overflow:
-        return points, False
-
-    sx = size_x / span_x
-    sy = size_y / span_y
-    scale = min(sx, sy)
-    src_cx = (min_x + max_x) * 0.5
-    src_cy = (min_y + max_y) * 0.5
-    dst_cx = size_x * 0.5
-    dst_cy = size_y * 0.5
-    out = [((x - src_cx) * scale + dst_cx, (y - src_cy) * scale + dst_cy) for (x, y) in points]
     _debug_log(
-        f"track footprint normalized src_span=({span_x:.3f},{span_y:.3f}) terrain_span=({size_x:.3f},{size_y:.3f}) scale={scale:.6f}"
+        f"track footprint normalized src_span=({span_x:.3f},{span_y:.3f}) "
+        f"terrain_span=({terrain_span_x:.3f},{terrain_span_y:.3f}) scale={scale:.6f} reason={reason}"
     )
-    return out, True
- main
+    return out, True, reason
 
 
 def _simplify_mesh_for_boolean(mesh_obj: bpy.types.Object, target_polys: int) -> bool:
@@ -298,16 +286,10 @@ def _curve_to_mesh(curve_obj: bpy.types.Object, name: str) -> bpy.types.Object:
     bpy.data.objects.remove(curve_obj, do_unlink=True)
     _set_object_active_selected(mesh_obj)
 
-
-
-
     _debug_log(
         f"mesh name={name} verts={len(mesh_obj.data.vertices)} edges={len(mesh_obj.data.edges)} polys={len(mesh_obj.data.polygons)} "
         f"dims=({mesh_obj.dimensions.x:.3f},{mesh_obj.dimensions.y:.3f},{mesh_obj.dimensions.z:.3f})"
     )
-
-
-
 
     return mesh_obj
 
@@ -332,8 +314,6 @@ def _create_track_inlay(job: dict, terrain_top: bpy.types.Object) -> tuple[bpy.t
         f"fit_check raw_bbox=({raw_min_x:.3f},{raw_max_x:.3f},{raw_min_y:.3f},{raw_max_y:.3f}) fitted_bbox=({fit_min_x:.3f},{fit_max_x:.3f},{fit_min_y:.3f},{fit_max_y:.3f}) terrain_span=({terrain_span_x:.3f},{terrain_span_y:.3f}) applied={normalized} reason={fit_reason}"
     )
 
-    points, normalized = _fit_points_to_terrain(points, size_x, size_y)
- main
     if len(points) < 2:
         _debug_log("track inlay skipped: not enough valid track points")
         return None, None
@@ -353,7 +333,6 @@ def _create_track_inlay(job: dict, terrain_top: bpy.types.Object) -> tuple[bpy.t
         f"groove_width={groove_width:.3f} groove_depth={groove_depth:.3f} track_width={track_width:.3f} total_h={total_h:.3f} normalized={normalized}"
     )
 
-
     _stage_log("track", f"creating groove curve points={len(points)} groove_width={groove_width:.3f} groove_depth={groove_depth:.3f}")
 
     groove_curve = _curve_from_points(points, "GrooveCurve")
@@ -370,7 +349,6 @@ def _create_track_inlay(job: dict, terrain_top: bpy.types.Object) -> tuple[bpy.t
     _stage_log("track", "before groove curve->mesh")
     _set_object_active_selected(groove_curve)
     groove_mesh = _curve_to_mesh(groove_curve, "GrooveCurve")
-
 
     edge_count = len(groove_mesh.data.edges)
     if edge_count > 250000:
@@ -389,7 +367,6 @@ def _create_track_inlay(job: dict, terrain_top: bpy.types.Object) -> tuple[bpy.t
         )
         bm.to_mesh(groove_mesh.data)
         bm.free()
-
 
     _stage_log("track", f"creating track curve points={len(points)} track_width={track_width:.3f} total_h={total_h:.3f}")
 
@@ -414,11 +391,9 @@ def _create_track_inlay(job: dict, terrain_top: bpy.types.Object) -> tuple[bpy.t
     bev.segments = 2
     bev.limit_method = "ANGLE"
 
-
     _debug_log(
         f"top bevel pre-apply verts={len(track_mesh.data.vertices)} edges={len(track_mesh.data.edges)} polys={len(track_mesh.data.polygons)} width={bev.width:.4f} segments={bev.segments}"
     )
-
 
     _set_object_active_selected(track_mesh)
     bpy.ops.object.modifier_apply(modifier=bev.name)
@@ -631,15 +606,6 @@ def main() -> None:
                 f"pre-boolean base_dims=({base.dimensions.x:.3f},{base.dimensions.y:.3f},{base.dimensions.z:.3f}) groove_dims=({groove.dimensions.x:.3f},{groove.dimensions.y:.3f},{groove.dimensions.z:.3f}) track_dims=({track_dx:.3f},{track_dy:.3f},{track_dz:.3f}) base_polys={len(base.data.polygons)} groove_polys={len(groove.data.polygons)} simplified={simplified} skip_boolean=False reason=ok",
             )
             _apply_boolean(base, groove, "DIFFERENCE")
-
-
-        simplified = _simplify_mesh_for_boolean(groove, target_polys=280000)
-        _stage_log(
-            "track",
-            f"pre-boolean base_dims=({base.dimensions.x:.3f},{base.dimensions.y:.3f},{base.dimensions.z:.3f}) groove_dims=({groove.dimensions.x:.3f},{groove.dimensions.y:.3f},{groove.dimensions.z:.3f}) base_polys={len(base.data.polygons)} groove_polys={len(groove.data.polygons)} simplified={simplified}",
-        )
-        _apply_boolean(base, groove, "DIFFERENCE")
- main
 
     _stage_log("ams", "before AMS layer creation")
     water, green, detail = _build_ams_layers(job, terrain_for_layers)
