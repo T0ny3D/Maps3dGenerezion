@@ -58,7 +58,7 @@ def _apply_boolean(base: bpy.types.Object, tool: bpy.types.Object, op: str) -> N
     mod.object = tool
     bpy.context.view_layer.objects.active = base
     bpy.ops.object.modifier_apply(modifier=mod.name)
-    _stage_log("boolean", f"end op={op} base_polys={len(base.data.polygons) if base.type=='MESH' and base.data else -1}")
+    _stage_log("boolean", f"end op={op} base_polys={len(base.data.polygons) if base.type == 'MESH' and base.data else -1}")
     bpy.data.objects.remove(tool, do_unlink=True)
 
 
@@ -104,9 +104,6 @@ def _fit_points_to_terrain(
 
     sx = terrain_span_x / span_x
     sy = terrain_span_y / span_y
-    # Keep XY in the same terrain frame even when source comes from a different aspect
-    # ratio (e.g. lon/lat-derived spans). Uniform scaling was preserving source aspect
-    # but was also causing visibly distorted placement against terrain/AMS layers.
     scale_x = sx
     scale_y = sy
     src_cx = (min_x + max_x) * 0.5
@@ -231,7 +228,12 @@ def _create_terrain(job: dict) -> bpy.types.Object:
     est_vertices = grid_res * grid_res
     _stage_log("terrain", f"begin size=({size_x:.3f},{size_y:.3f}) base_mm={base_mm:.3f} grid_res={grid_res} est_vertices={est_vertices}")
 
-    bpy.ops.mesh.primitive_grid_add(x_subdivisions=grid_res, y_subdivisions=grid_res, size=1.0, location=(size_x / 2.0, size_y / 2.0, 0.0))
+    bpy.ops.mesh.primitive_grid_add(
+        x_subdivisions=grid_res,
+        y_subdivisions=grid_res,
+        size=1.0,
+        location=(size_x / 2.0, size_y / 2.0, 0.0),
+    )
     terrain = bpy.context.active_object
     terrain.name = "Terrain"
     terrain.scale = (size_x / 2.0, size_y / 2.0, 1.0)
@@ -261,7 +263,11 @@ def _create_terrain(job: dict) -> bpy.types.Object:
     bpy.ops.object.modifier_apply(modifier=solidify.name)
 
     _enable_smooth_shading(terrain)
-    _stage_log("terrain", f"end verts={len(terrain.data.vertices)} edges={len(terrain.data.edges)} polys={len(terrain.data.polygons)} dims=({terrain.dimensions.x:.3f},{terrain.dimensions.y:.3f},{terrain.dimensions.z:.3f})")
+    _stage_log(
+        "terrain",
+        f"end verts={len(terrain.data.vertices)} edges={len(terrain.data.edges)} polys={len(terrain.data.polygons)} "
+        f"dims=({terrain.dimensions.x:.3f},{terrain.dimensions.y:.3f},{terrain.dimensions.z:.3f})",
+    )
     return terrain
 
 
@@ -275,7 +281,10 @@ def _curve_from_points(points: list[tuple[float, float]], name: str) -> bpy.type
         spline.points[i].co = (x, y, 0.0, 1.0)
     cobj = bpy.data.objects.new(name, cdata)
     bpy.context.collection.objects.link(cobj)
-    _debug_log(f"curve name={name} points={len(points)} bevel_depth={float(cdata.bevel_depth):.4f} extrude={float(cdata.extrude):.4f} resolution_u={cdata.resolution_u}")
+    _debug_log(
+        f"curve name={name} points={len(points)} bevel_depth={float(cdata.bevel_depth):.4f} "
+        f"extrude={float(cdata.extrude):.4f} resolution_u={cdata.resolution_u}"
+    )
     return cobj
 
 
@@ -313,8 +322,8 @@ def _curve_to_mesh(curve_obj: bpy.types.Object, name: str) -> bpy.types.Object:
     _set_object_active_selected(mesh_obj)
 
     _debug_log(
-        f"mesh name={name} verts={len(mesh_obj.data.vertices)} edges={len(mesh_obj.data.edges)} polys={len(mesh_obj.data.polygons)} "
-        f"dims=({mesh_obj.dimensions.x:.3f},{mesh_obj.dimensions.y:.3f},{mesh_obj.dimensions.z:.3f})"
+        f"mesh name={name} verts={len(mesh_obj.data.vertices)} edges={len(mesh_obj.data.edges)} "
+        f"polys={len(mesh_obj.data.polygons)} dims=({mesh_obj.dimensions.x:.3f},{mesh_obj.dimensions.y:.3f},{mesh_obj.dimensions.z:.3f})"
     )
 
     return mesh_obj
@@ -337,7 +346,9 @@ def _create_track_inlay(job: dict, terrain_top: bpy.types.Object) -> tuple[bpy.t
     points, normalized, fit_reason = _fit_points_to_terrain(points, terrain_span_x, terrain_span_y)
     fit_min_x, fit_max_x, fit_min_y, fit_max_y = _points_bbox(points)
     _debug_log(
-        f"fit_check raw_bbox=({raw_min_x:.3f},{raw_max_x:.3f},{raw_min_y:.3f},{raw_max_y:.3f}) fitted_bbox=({fit_min_x:.3f},{fit_max_x:.3f},{fit_min_y:.3f},{fit_max_y:.3f}) terrain_span=({terrain_span_x:.3f},{terrain_span_y:.3f}) applied={normalized} reason={fit_reason}"
+        f"fit_check raw_bbox=({raw_min_x:.3f},{raw_max_x:.3f},{raw_min_y:.3f},{raw_max_y:.3f}) "
+        f"fitted_bbox=({fit_min_x:.3f},{fit_max_x:.3f},{fit_min_y:.3f},{fit_max_y:.3f}) "
+        f"terrain_span=({terrain_span_x:.3f},{terrain_span_y:.3f}) applied={normalized} reason={fit_reason}"
     )
 
     if len(points) < 2:
@@ -408,7 +419,6 @@ def _create_track_inlay(job: dict, terrain_top: bpy.types.Object) -> tuple[bpy.t
     track_curve.data.extrude = total_h
 
     _stage_log("track", "before track curve->mesh")
-
     _set_object_active_selected(track_curve)
     track_mesh = _curve_to_mesh(track_curve, "TrackInlayCurve")
 
@@ -418,7 +428,8 @@ def _create_track_inlay(job: dict, terrain_top: bpy.types.Object) -> tuple[bpy.t
     bev.limit_method = "ANGLE"
 
     _debug_log(
-        f"top bevel pre-apply verts={len(track_mesh.data.vertices)} edges={len(track_mesh.data.edges)} polys={len(track_mesh.data.polygons)} width={bev.width:.4f} segments={bev.segments}"
+        f"top bevel pre-apply verts={len(track_mesh.data.vertices)} edges={len(track_mesh.data.edges)} "
+        f"polys={len(track_mesh.data.polygons)} width={bev.width:.4f} segments={bev.segments}"
     )
 
     _set_object_active_selected(track_mesh)
@@ -454,14 +465,11 @@ def _make_layer_from_curves(curves: list[bpy.types.Object], terrain: bpy.types.O
 
         _stage_log(
             "ams",
-            f"layer={name} part={idx} verts={len(m.data.vertices)} polys={len(m.data.polygons)} dims=({m.dimensions.x:.3f},{m.dimensions.y:.3f},{m.dimensions.z:.3f})",
+            f"layer={name} part={idx} verts={len(m.data.vertices)} polys={len(m.data.polygons)} "
+            f"dims=({m.dimensions.x:.3f},{m.dimensions.y:.3f},{m.dimensions.z:.3f})",
         )
         meshes.append(m)
 
-    # NOTE: Avoid repeated exact boolean UNION across thin line-derived strips.
-    # In practice this was causing severe topology collapse (poly count implosions)
-    # and visible fidelity loss. We instead join meshes into one object while
-    # preserving disconnected islands; STL export supports this safely.
     base = meshes[0]
     if len(meshes) > 1:
         _set_object_active_selected(base)
@@ -483,7 +491,8 @@ def _make_layer_from_curves(curves: list[bpy.types.Object], terrain: bpy.types.O
     _enable_smooth_shading(base)
     _stage_log(
         "ams",
-        f"layer={name} merged parts={len(meshes)} verts={len(base.data.vertices)} polys={len(base.data.polygons)} dims=({base.dimensions.x:.3f},{base.dimensions.y:.3f},{base.dimensions.z:.3f})",
+        f"layer={name} merged parts={len(meshes)} verts={len(base.data.vertices)} polys={len(base.data.polygons)} "
+        f"dims=({base.dimensions.x:.3f},{base.dimensions.y:.3f},{base.dimensions.z:.3f})",
     )
     return base
 
@@ -521,23 +530,18 @@ def _build_ams_layers(job: dict, terrain_top: bpy.types.Object) -> tuple[bpy.typ
 
     _stage_log(
         "ams",
-        f"input counts water={len(water_lines)} green={len(green_lines)} detail={len(detail_lines)} terrain_span=({terrain_span_x:.3f},{terrain_span_y:.3f})",
+        f"input counts water={len(water_lines)} green={len(green_lines)} detail={len(detail_lines)} "
+        f"terrain_span=({terrain_span_x:.3f},{terrain_span_y:.3f})",
     )
 
     water_lines, _, _ = _fit_lines_to_terrain(water_lines, terrain_span_x, terrain_span_y, "water")
     green_lines, _, _ = _fit_lines_to_terrain(green_lines, terrain_span_x, terrain_span_y, "green")
     detail_lines, _, _ = _fit_lines_to_terrain(detail_lines, terrain_span_x, terrain_span_y, "detail")
-    water_curves = _curves_from_lines([[list(p) for p in line] for line in water_lines], "WaterCurve", 1.4)
-    green_curves = _curves_from_lines([[list(p) for p in line] for line in green_lines], "GreenCurve", 1.8)
-    detail_curves = _curves_from_lines([[list(p) for p in line] for line in detail_lines], "DetailCurve", 0.45)
-
-
 
     water_curves = _curves_from_lines([[list(p) for p in line] for line in water_lines], "WaterCurve", 1.4)
     green_curves = _curves_from_lines([[list(p) for p in line] for line in green_lines], "GreenCurve", 1.8)
     detail_curves = _curves_from_lines([[list(p) for p in line] for line in detail_lines], "DetailCurve", 0.45)
 
- main
     allow_fallback = bool(job.get("ams_allow_fallback", False))
     real_layers_present = bool(water_curves or green_curves or detail_curves)
 
@@ -555,12 +559,14 @@ def _build_ams_layers(job: dict, terrain_top: bpy.types.Object) -> tuple[bpy.typ
     elif not allow_fallback:
         _stage_log(
             "ams",
-            f"fallback disabled: output may omit missing categories (water={len(water_curves)} green={len(green_curves)} detail={len(detail_curves)})",
+            f"fallback disabled: output may omit missing categories "
+            f"(water={len(water_curves)} green={len(green_curves)} detail={len(detail_curves)})",
         )
     else:
         _stage_log(
             "ams",
-            f"fallback skipped: real AMS geometry already present (water={len(water_curves)} green={len(green_curves)} detail={len(detail_curves)})",
+            f"fallback skipped: real AMS geometry already present "
+            f"(water={len(water_curves)} green={len(green_curves)} detail={len(detail_curves)})",
         )
 
     water = _make_layer_from_curves(water_curves, terrain_top, thickness=0.8, name="WaterLayer")
@@ -573,7 +579,12 @@ def _add_finger_notches(frame: bpy.types.Object, size_x: float, radius: float, z
     if radius <= 0.0:
         return
     for x_pos in (size_x * 0.35, size_x * 0.65):
-        bpy.ops.mesh.primitive_cylinder_add(radius=radius, depth=radius * 2.5, location=(x_pos, 0.0, z_level), rotation=(math.radians(90), 0.0, 0.0))
+        bpy.ops.mesh.primitive_cylinder_add(
+            radius=radius,
+            depth=radius * 2.5,
+            location=(x_pos, 0.0, z_level),
+            rotation=(math.radians(90), 0.0, 0.0),
+        )
         _apply_boolean(frame, bpy.context.active_object, "DIFFERENCE")
 
 
@@ -604,7 +615,11 @@ def _create_frame(job: dict) -> bpy.types.Object:
 
     bpy.ops.mesh.primitive_cube_add(location=(size_x / 2.0, size_y / 2.0, frame_h - top_big_depth - seat_depth / 2.0))
     seat_cut = bpy.context.active_object
-    seat_cut.scale = (max(1.0, size_x - 2 * clearance) / 2.0, max(1.0, size_y - 2 * clearance) / 2.0, seat_depth / 2.0 + 1.0)
+    seat_cut.scale = (
+        max(1.0, size_x - 2 * clearance) / 2.0,
+        max(1.0, size_y - 2 * clearance) / 2.0,
+        seat_depth / 2.0 + 1.0,
+    )
     bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
     _apply_boolean(frame, seat_cut, "DIFFERENCE")
 
@@ -638,14 +653,11 @@ def _create_test_frame_corner(job: dict) -> bpy.types.Object:
     _apply_boolean(frame, cutter, "INTERSECT")
     return frame
 
+
 def _mesh_bounds(obj: bpy.types.Object | None) -> tuple[float, float, float, float, float, float] | None:
     if obj is None or obj.type != "MESH" or obj.data is None or len(obj.data.vertices) == 0:
         return None
 
-def _mesh_bounds_str(obj: bpy.types.Object | None) -> str:
-    if obj is None or obj.type != "MESH" or obj.data is None or len(obj.data.vertices) == 0:
-        return "none"
- main
     xs: list[float] = []
     ys: list[float] = []
     zs: list[float] = []
@@ -672,7 +684,9 @@ def _enforce_xy_footprint(obj: bpy.types.Object | None, base: bpy.types.Object, 
     exceeds = lx0 < (bx0 - tol) or lx1 > (bx1 + tol) or ly0 < (by0 - tol) or ly1 > (by1 + tol)
     _stage_log(
         "export",
-        f"footprint_precheck layer={label} exceeds={exceeds} layer_xy=({lx0:.3f},{lx1:.3f},{ly0:.3f},{ly1:.3f}) base_xy=({bx0:.3f},{bx1:.3f},{by0:.3f},{by1:.3f})",
+        f"footprint_precheck layer={label} exceeds={exceeds} "
+        f"layer_xy=({lx0:.3f},{lx1:.3f},{ly0:.3f},{ly1:.3f}) "
+        f"base_xy=({bx0:.3f},{bx1:.3f},{by0:.3f},{by1:.3f})",
     )
     if not exceeds:
         return obj
@@ -704,7 +718,9 @@ def _enforce_xy_footprint(obj: bpy.types.Object | None, base: bpy.types.Object, 
         px0, px1, py0, py1, _, _ = post
         _stage_log(
             "export",
-            f"footprint_clamped layer={label} post_xy=({px0:.3f},{px1:.3f},{py0:.3f},{py1:.3f}) base_xy=({bx0:.3f},{bx1:.3f},{by0:.3f},{by1:.3f})",
+            f"footprint_clamped layer={label} "
+            f"post_xy=({px0:.3f},{px1:.3f},{py0:.3f},{py1:.3f}) "
+            f"base_xy=({bx0:.3f},{bx1:.3f},{by0:.3f},{by1:.3f})",
         )
     return obj
 
@@ -716,11 +732,8 @@ def _mesh_bounds_str(obj: bpy.types.Object | None) -> str:
     x0, x1, y0, y1, z0, z1 = b
     return (
         f"bbox=({x0:.3f},{x1:.3f},{y0:.3f},{y1:.3f},{z0:.3f},{z1:.3f}) "
-
-    return (
-        f"bbox=({min(xs):.3f},{max(xs):.3f},{min(ys):.3f},{max(ys):.3f},{min(zs):.3f},{max(zs):.3f}) "
- main
-        f"dims=({obj.dimensions.x:.3f},{obj.dimensions.y:.3f},{obj.dimensions.z:.3f}) polys={len(obj.data.polygons)}"
+        f"dims=({obj.dimensions.x:.3f},{obj.dimensions.y:.3f},{obj.dimensions.z:.3f}) "
+        f"polys={len(obj.data.polygons)}"
     )
 
 
@@ -744,7 +757,11 @@ def main() -> None:
     _stage_log("job", f"loading job json from {job_path}")
     raw_job = job_path.read_text(encoding="utf-8")
     job = json.loads(raw_job)
-    _stage_log("job", f"job loaded keys={len(job.keys())} track_points={len(job.get('track_points_mm', []))} size=({job.get('size_mm_x')},{job.get('size_mm_y')})")
+    _stage_log(
+        "job",
+        f"job loaded keys={len(job.keys())} track_points={len(job.get('track_points_mm', []))} "
+        f"size=({job.get('size_mm_x')},{job.get('size_mm_y')})",
+    )
     out_base = Path(job.get("out_base_stl_path", "base_brown.stl"))
     out_water = Path(job.get("out_water_stl_path", "water.stl"))
     out_green = Path(job.get("out_green_stl_path", "green.stl"))
@@ -772,18 +789,28 @@ def main() -> None:
         track_dy = track_inlay.dimensions.y if track_inlay is not None else 0.0
         track_dz = track_inlay.dimensions.z if track_inlay is not None else 0.0
         groove_too_wide = groove.dimensions.x > (base.dimensions.x * terrain_xy_guard) or groove.dimensions.y > (base.dimensions.y * terrain_xy_guard)
-        track_too_wide = track_inlay is not None and (track_dx > (base.dimensions.x * terrain_xy_guard) or track_dy > (base.dimensions.y * terrain_xy_guard))
+        track_too_wide = track_inlay is not None and (
+            track_dx > (base.dimensions.x * terrain_xy_guard) or track_dy > (base.dimensions.y * terrain_xy_guard)
+        )
         if groove_too_wide or track_too_wide:
             _stage_log(
                 "track",
-                f"pre-boolean base_dims=({base.dimensions.x:.3f},{base.dimensions.y:.3f},{base.dimensions.z:.3f}) groove_dims=({groove.dimensions.x:.3f},{groove.dimensions.y:.3f},{groove.dimensions.z:.3f}) track_dims=({track_dx:.3f},{track_dy:.3f},{track_dz:.3f}) base_polys={len(base.data.polygons)} groove_polys={len(groove.data.polygons)} simplified=False skip_boolean=True reason=xy_oversize_after_fit",
+                f"pre-boolean base_dims=({base.dimensions.x:.3f},{base.dimensions.y:.3f},{base.dimensions.z:.3f}) "
+                f"groove_dims=({groove.dimensions.x:.3f},{groove.dimensions.y:.3f},{groove.dimensions.z:.3f}) "
+                f"track_dims=({track_dx:.3f},{track_dy:.3f},{track_dz:.3f}) "
+                f"base_polys={len(base.data.polygons)} groove_polys={len(groove.data.polygons)} "
+                f"simplified=False skip_boolean=True reason=xy_oversize_after_fit",
             )
             bpy.data.objects.remove(groove, do_unlink=True)
         else:
             simplified = _simplify_mesh_for_boolean(groove, target_polys=280000)
             _stage_log(
                 "track",
-                f"pre-boolean base_dims=({base.dimensions.x:.3f},{base.dimensions.y:.3f},{base.dimensions.z:.3f}) groove_dims=({groove.dimensions.x:.3f},{groove.dimensions.y:.3f},{groove.dimensions.z:.3f}) track_dims=({track_dx:.3f},{track_dy:.3f},{track_dz:.3f}) base_polys={len(base.data.polygons)} groove_polys={len(groove.data.polygons)} simplified={simplified} skip_boolean=False reason=ok",
+                f"pre-boolean base_dims=({base.dimensions.x:.3f},{base.dimensions.y:.3f},{base.dimensions.z:.3f}) "
+                f"groove_dims=({groove.dimensions.x:.3f},{groove.dimensions.y:.3f},{groove.dimensions.z:.3f}) "
+                f"track_dims=({track_dx:.3f},{track_dy:.3f},{track_dz:.3f}) "
+                f"base_polys={len(base.data.polygons)} groove_polys={len(groove.data.polygons)} "
+                f"simplified={simplified} skip_boolean=False reason=ok",
             )
             _apply_boolean(base, groove, "DIFFERENCE")
 
@@ -810,8 +837,6 @@ def main() -> None:
     detail = _enforce_xy_footprint(detail, base, "detail")
     track_inlay = _enforce_xy_footprint(track_inlay, base, "track")
 
-
- main
     _stage_log("export", f"base stats {_mesh_bounds_str(base)}")
     _stage_log("export", f"water stats {_mesh_bounds_str(water)}")
     _stage_log("export", f"green stats {_mesh_bounds_str(green)}")
@@ -832,7 +857,7 @@ def main() -> None:
     if bool(job.get("separate_frame", True)):
         _stage_log("frame", "before frame creation")
         frame_obj = _create_test_frame_corner(job) if bool(job.get("test_mode", False)) else _create_frame(job)
-        _stage_log("frame", f"after frame creation polys={len(frame_obj.data.polygons) if frame_obj and frame_obj.type=='MESH' else -1}")
+        _stage_log("frame", f"after frame creation polys={len(frame_obj.data.polygons) if frame_obj and frame_obj.type == 'MESH' else -1}")
         _stage_log("export", f"exporting frame -> {out_frame}")
         _export_stl(frame_obj, out_frame)
 
