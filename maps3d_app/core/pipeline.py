@@ -13,7 +13,11 @@ import trimesh
 from shapely.geometry import GeometryCollection, LineString, MultiLineString, box
 
 from .gpx_loader import load_gpx_points
+ codex/transition-to-python-based-stl-generation-pipeline-d8wahe
 from .mesh_builder import build_line_layer_mesh, build_terrain_mesh
+
+from .mesh_builder import build_terrain_mesh, build_track_mesh
+ main
 from .model_space import ModelSpace
 
 _WGS84_GEOD = Geod(ellps="WGS84")
@@ -106,11 +110,16 @@ def _compute_bbox(points: np.ndarray, margin_ratio: float) -> tuple[float, float
     return minx - mx, miny - my, maxx + mx, maxy + my
 
 
+ codex/transition-to-python-based-stl-generation-pipeline-d8wahe
 def _python_output_paths(stl_output_path: str | Path, test_mode: bool) -> dict[str, Path]:
+
+def _python_output_paths(stl_output_path: str | Path, test_mode: bool) -> tuple[Path, Path, Path]:
+ main
     out = Path(stl_output_path)
     suffix = "_test" if test_mode else ""
     stem = out.stem
     parent = out.parent
+ codex/transition-to-python-based-stl-generation-pipeline-d8wahe
     return {
         "base": parent / f"{stem}{suffix}_base_brown.stl",
         "water": parent / f"{stem}{suffix}_water.stl",
@@ -122,6 +131,15 @@ def _python_output_paths(stl_output_path: str | Path, test_mode: bool) -> dict[s
 
 
 def _clip_polyline_to_footprint(track_xy_mm: np.ndarray, model_width_mm: float, model_height_mm: float) -> list[np.ndarray]:
+
+    base_path = parent / f"{stem}{suffix}_base_brown.stl"
+    track_path = parent / f"{stem}{suffix}_track_inlay_red.stl"
+    combined_path = out
+    return base_path, track_path, combined_path
+
+
+def _clip_track_to_footprint(track_xy_mm: np.ndarray, model_width_mm: float, model_height_mm: float) -> list[np.ndarray]:
+ main
     if len(track_xy_mm) < 2:
         return []
 
@@ -149,6 +167,7 @@ def _clip_polyline_to_footprint(track_xy_mm: np.ndarray, model_width_mm: float, 
     return _extract_segments(clipped)
 
 
+ codex/transition-to-python-based-stl-generation-pipeline-d8wahe
 def _fetch_osm_line_layers(points_lonlat: np.ndarray, to_dem: Transformer, model_space: ModelSpace) -> dict[str, list[np.ndarray]]:
     min_lon = float(np.min(points_lonlat[:, 0]))
     min_lat = float(np.min(points_lonlat[:, 1]))
@@ -200,6 +219,8 @@ out geom;
     return layers
 
 
+
+ main
 def run_python_pipeline(
     gpx_path: str | Path,
     dem_path: str | Path,
@@ -267,6 +288,7 @@ def run_python_pipeline(
         z_mm = (dem - min_elev) * horiz_scale_mm_per_meter * config.vertical_scale
 
         track_xy_mm = model_space.to_model_xy(points_dem)
+ codex/transition-to-python-based-stl-generation-pipeline-d8wahe
         osm_layers = _fetch_osm_line_layers(points_lonlat, to_dem=to_dem, model_space=model_space)
 
     terrain_mesh = build_terrain_mesh(x_mm=x_mm, y_mm=y_mm, z_mm=z_mm, base_thickness_mm=config.base_thickness_mm)
@@ -304,6 +326,27 @@ def run_python_pipeline(
         z_mm=z_mm,
         layer_height_mm=0.7,
         layer_width_mm=1.8,
+
+
+    terrain_mesh = build_terrain_mesh(x_mm=x_mm, y_mm=y_mm, z_mm=z_mm, base_thickness_mm=config.base_thickness_mm)
+
+    clipped_segments = _clip_track_to_footprint(track_xy_mm, config.model_width_mm, config.model_height_mm)
+    track_segments = [
+        build_track_mesh(
+            track_xy_mm=segment,
+            x_mm=x_mm,
+            y_mm=y_mm,
+            z_mm=z_mm,
+            track_height_mm=config.track_height_mm,
+        )
+        for segment in clipped_segments
+    ]
+    track_segments = [m for m in track_segments if m.faces.shape[0] > 0]
+    track_mesh = (
+        trimesh.util.concatenate(track_segments)
+        if track_segments
+        else trimesh.Trimesh(vertices=np.zeros((0, 3)), faces=np.zeros((0, 3), dtype=np.int64), process=False)
+ main
     )
     green_mesh = build_line_layer_mesh(
         line_segments_xy_mm=clipped_green_segments,
@@ -328,6 +371,7 @@ def run_python_pipeline(
     out_paths = _python_output_paths(stl_output_path, config.test_mode)
     out_paths["base"].parent.mkdir(parents=True, exist_ok=True)
 
+ codex/transition-to-python-based-stl-generation-pipeline-d8wahe
     terrain_mesh.export(out_paths["base"])
     if track_mesh.faces.shape[0] > 0:
         track_mesh.export(out_paths["track"])
@@ -344,6 +388,21 @@ def run_python_pipeline(
             combined_meshes.append(mesh)
     final_mesh = trimesh.util.concatenate(combined_meshes)
     final_mesh.export(out_paths["combined"])
+
+    if terrain_mesh.faces.shape[0] == 0:
+        raise ValueError("Mesh base vuota, impossibile esportare STL.")
+
+    out_base, out_track, out_combined = _python_output_paths(stl_output_path, config.test_mode)
+    out_base.parent.mkdir(parents=True, exist_ok=True)
+    terrain_mesh.export(out_base)
+
+    if track_mesh.faces.shape[0] > 0:
+        track_mesh.export(out_track)
+
+    combined_meshes = [terrain_mesh] + ([track_mesh] if track_mesh.faces.shape[0] > 0 else [])
+    final_mesh = trimesh.util.concatenate(combined_meshes)
+    final_mesh.export(out_combined)
+ main
 
 
 def run_pipeline(
