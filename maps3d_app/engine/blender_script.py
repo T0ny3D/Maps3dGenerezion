@@ -7,6 +7,7 @@ from pathlib import Path
 
 import bmesh
 import bpy
+from mathutils import Vector
 
 
 def _stage_log(stage: str, message: str) -> None:
@@ -669,14 +670,49 @@ def _mesh_bounds(obj: bpy.types.Object | None) -> tuple[float, float, float, flo
     return min(xs), max(xs), min(ys), max(ys), min(zs), max(zs)
 
 
+def _mesh_bounds_in_base_frame(
+    obj: bpy.types.Object | None, base_inv: bpy.types.Matrix
+) -> tuple[float, float, float, float, float, float] | None:
+    if obj is None or obj.type != "MESH" or obj.data is None or len(obj.data.vertices) == 0:
+        return None
+
+    xs: list[float] = []
+    ys: list[float] = []
+    zs: list[float] = []
+    for v in obj.data.vertices:
+        c_world = obj.matrix_world @ v.co
+        c_base = base_inv @ c_world
+        xs.append(float(c_base.x))
+        ys.append(float(c_base.y))
+        zs.append(float(c_base.z))
+    return min(xs), max(xs), min(ys), max(ys), min(zs), max(zs)
+
+
 def _enforce_xy_footprint(obj: bpy.types.Object | None, base: bpy.types.Object, label: str) -> bpy.types.Object | None:
     if obj is None or obj.type != "MESH" or obj.data is None:
         return obj
 
-    base_bounds = _mesh_bounds(base)
-    layer_bounds = _mesh_bounds(obj)
+    base_inv = base.matrix_world.inverted()
+    base_bounds = _mesh_bounds_in_base_frame(base, base_inv)
+    layer_bounds = _mesh_bounds_in_base_frame(obj, base_inv)
     if base_bounds is None or layer_bounds is None:
         return obj
+
+    base_world_bounds = _mesh_bounds(base)
+    layer_world_bounds = _mesh_bounds(obj)
+    if base_world_bounds is not None and layer_world_bounds is not None:
+        btx, bty, btz = base.matrix_world.translation
+        otx, oty, otz = obj.matrix_world.translation
+        _stage_log(
+            "export",
+            f"footprint_frame_debug layer={label} "
+            f"layer_origin=({obj.location.x:.3f},{obj.location.y:.3f},{obj.location.z:.3f}) "
+            f"layer_world_t=({otx:.3f},{oty:.3f},{otz:.3f}) "
+            f"layer_world_xy=({layer_world_bounds[0]:.3f},{layer_world_bounds[1]:.3f},{layer_world_bounds[2]:.3f},{layer_world_bounds[3]:.3f}) "
+            f"base_origin=({base.location.x:.3f},{base.location.y:.3f},{base.location.z:.3f}) "
+            f"base_world_t=({btx:.3f},{bty:.3f},{btz:.3f}) "
+            f"base_world_xy=({base_world_bounds[0]:.3f},{base_world_bounds[1]:.3f},{base_world_bounds[2]:.3f},{base_world_bounds[3]:.3f})",
+        )
 
     bx0, bx1, by0, by1, bz0, bz1 = base_bounds
     lx0, lx1, ly0, ly1, lz0, lz1 = layer_bounds
@@ -692,28 +728,57 @@ def _enforce_xy_footprint(obj: bpy.types.Object | None, base: bpy.types.Object, 
         return obj
 
     pad = 0.01
-    cx = (bx0 + bx1) * 0.5
-    cy = (by0 + by1) * 0.5
-    cz = (bz0 + bz1) * 0.5
-    sx = max(0.01, (bx1 - bx0) * 0.5 - pad)
-    sy = max(0.01, (by1 - by0) * 0.5 - pad)
-    sz = max(5.0, (max(bz1, lz1) - min(bz0, lz0)) * 1.2)
+    x_min = bx0 + pad
+    x_max = bx1 - pad
+    y_min = by0 + pad
+    y_max = by1 - pad
 
-    bpy.ops.mesh.primitive_cube_add(location=(cx, cy, cz))
-    cutter = bpy.context.active_object
-    cutter.name = f"{label}XYClamp"
-    cutter.scale = (sx, sy, sz)
-    bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
+    obj_inv = obj.matrix_world.inverted().to_3x3()
+    base_to_world = base.matrix_world.to_3x3()
 
-    mod = obj.modifiers.new(name=f"{label}XYClamp", type="BOOLEAN")
-    mod.operation = "INTERSECT"
-    mod.solver = "EXACT"
-    mod.object = cutter
-    _set_object_active_selected(obj)
-    bpy.ops.object.modifier_apply(modifier=mod.name)
-    bpy.data.objects.remove(cutter, do_unlink=True)
+    bm = bmesh.new()
+    bm.from_mesh(obj.data)
 
-    post = _mesh_bounds(obj)
+    center_y = (by0 + by1) * 0.5
+    center_z = (bz0 + bz1) * 0.5
+    center_x = (bx0 + bx1) * 0.5
+
+    planes: list[tuple[Vector, Vector]] = [
+        (Vector((x_min, center_y, center_z)), Vector((1.0, 0.0, 0.0))),
+        (Vector((x_max, center_y, center_z)), Vector((-1.0, 0.0, 0.0))),
+        (Vector((center_x, y_min, center_z)), Vector((0.0, 1.0, 0.0))),
+        (Vector((center_x, y_max, center_z)), Vector((0.0, -1.0, 0.0))),
+    ]
+
+    geom = list(bm.verts) + list(bm.edges) + list(bm.faces)
+    for plane_co_base, plane_no_base in planes:
+        plane_co_world = base.matrix_world @ plane_co_base
+        plane_no_world = (base_to_world @ plane_no_base).normalized()
+        plane_co_obj = obj.matrix_world.inverted() @ plane_co_world
+        plane_no_obj = (obj_inv @ plane_no_world).normalized()
+        bmesh.ops.bisect_plane(
+            bm,
+            geom=geom,
+            plane_co=plane_co_obj,
+            plane_no=plane_no_obj,
+            clear_outer=True,
+            clear_inner=False,
+            use_snap_center=False,
+        )
+        geom = list(bm.verts) + list(bm.edges) + list(bm.faces)
+
+    if len(bm.verts) == 0:
+        bm.free()
+        _stage_log("export", f"footprint_clamped layer={label} post=empty_mesh")
+        return obj
+
+    bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=1e-6)
+    bm.normal_update()
+    bm.to_mesh(obj.data)
+    obj.data.update()
+    bm.free()
+
+    post = _mesh_bounds_in_base_frame(obj, base_inv)
     if post is not None:
         px0, px1, py0, py1, _, _ = post
         _stage_log(
