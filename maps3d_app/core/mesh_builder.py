@@ -139,3 +139,32 @@ def build_track_mesh(
         return trimesh.Trimesh(vertices=np.zeros((0, 3)), faces=np.zeros((0, 3), dtype=np.int64), process=False)
 
     return trimesh.Trimesh(vertices=np.asarray(vertices), faces=np.asarray(faces, dtype=np.int64), process=False)
+
+
+def build_line_layer_mesh(
+    line_segments_xy_mm: list[np.ndarray],
+    x_mm: np.ndarray,
+    y_mm: np.ndarray,
+    z_mm: np.ndarray,
+    layer_height_mm: float,
+    layer_width_mm: float,
+) -> trimesh.Trimesh:
+    meshes: list[trimesh.Trimesh] = []
+    for segment in line_segments_xy_mm:
+        if len(segment) < 2:
+            continue
+        mesh = build_track_mesh(
+            track_xy_mm=segment,
+            x_mm=x_mm,
+            y_mm=y_mm,
+            z_mm=z_mm,
+            track_height_mm=layer_height_mm,
+            track_width_mm=layer_width_mm,
+        )
+        if mesh.faces.shape[0] > 0:
+            meshes.append(mesh)
+
+    if not meshes:
+        return trimesh.Trimesh(vertices=np.zeros((0, 3)), faces=np.zeros((0, 3), dtype=np.int64), process=False)
+
+    return trimesh.util.concatenate(meshes)
