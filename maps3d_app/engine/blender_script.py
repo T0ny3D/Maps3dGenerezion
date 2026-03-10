@@ -434,8 +434,9 @@ def _create_track_inlay(job: dict, terrain_top: bpy.types.Object) -> tuple[bpy.t
 def _make_layer_from_curves(curves: list[bpy.types.Object], terrain: bpy.types.Object, thickness: float, name: str) -> bpy.types.Object | None:
     if not curves:
         return None
+
     meshes: list[bpy.types.Object] = []
-    for c in curves:
+    for idx, c in enumerate(curves):
         sw = c.modifiers.new(name="LayerSW", type="SHRINKWRAP")
         sw.target = terrain
         sw.wrap_method = "PROJECT"
@@ -444,18 +445,46 @@ def _make_layer_from_curves(curves: list[bpy.types.Object], terrain: bpy.types.O
         sw.offset = 0.25
         _set_object_active_selected(c)
         m = _curve_to_mesh(c, c.name)
+
         solid = m.modifiers.new(name="Solid", type="SOLIDIFY")
         solid.thickness = max(0.4, thickness)
         solid.offset = 0.0
         _set_object_active_selected(m)
         bpy.ops.object.modifier_apply(modifier=solid.name)
+
+        _stage_log(
+            "ams",
+            f"layer={name} part={idx} verts={len(m.data.vertices)} polys={len(m.data.polygons)} dims=({m.dimensions.x:.3f},{m.dimensions.y:.3f},{m.dimensions.z:.3f})",
+        )
         meshes.append(m)
 
+    # NOTE: Avoid repeated exact boolean UNION across thin line-derived strips.
+    # In practice this was causing severe topology collapse (poly count implosions)
+    # and visible fidelity loss. We instead join meshes into one object while
+    # preserving disconnected islands; STL export supports this safely.
     base = meshes[0]
-    for m in meshes[1:]:
-        _apply_boolean(base, m, "UNION")
+    if len(meshes) > 1:
+        _set_object_active_selected(base)
+        for m in meshes[1:]:
+            m.select_set(True)
+        bpy.ops.object.join()
+        base = bpy.context.view_layer.objects.active
+
     base.name = name
+    _set_object_active_selected(base)
+    bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
+    bm = bmesh.new()
+    bm.from_mesh(base.data)
+    bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=0.0005)
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    bm.to_mesh(base.data)
+    bm.free()
+
     _enable_smooth_shading(base)
+    _stage_log(
+        "ams",
+        f"layer={name} merged parts={len(meshes)} verts={len(base.data.vertices)} polys={len(base.data.polygons)} dims=({base.dimensions.x:.3f},{base.dimensions.y:.3f},{base.dimensions.z:.3f})",
+    )
     return base
 
 
@@ -604,6 +633,23 @@ def _create_test_frame_corner(job: dict) -> bpy.types.Object:
     return frame
 
 
+def _mesh_bounds_str(obj: bpy.types.Object | None) -> str:
+    if obj is None or obj.type != "MESH" or obj.data is None or len(obj.data.vertices) == 0:
+        return "none"
+    xs: list[float] = []
+    ys: list[float] = []
+    zs: list[float] = []
+    for v in obj.data.vertices:
+        c = obj.matrix_world @ v.co
+        xs.append(float(c.x))
+        ys.append(float(c.y))
+        zs.append(float(c.z))
+    return (
+        f"bbox=({min(xs):.3f},{max(xs):.3f},{min(ys):.3f},{max(ys):.3f},{min(zs):.3f},{max(zs):.3f}) "
+        f"dims=({obj.dimensions.x:.3f},{obj.dimensions.y:.3f},{obj.dimensions.z:.3f}) polys={len(obj.data.polygons)}"
+    )
+
+
 def _export_stl(obj: bpy.types.Object | None, path: Path) -> None:
     if obj is None:
         _stage_log("export", f"skip none object -> {path}")
@@ -684,6 +730,12 @@ def main() -> None:
             detail = _make_test_map(detail, ts, sx, sy)
         if track_inlay is not None:
             track_inlay = _make_test_map(track_inlay, ts, sx, sy)
+
+    _stage_log("export", f"base stats {_mesh_bounds_str(base)}")
+    _stage_log("export", f"water stats {_mesh_bounds_str(water)}")
+    _stage_log("export", f"green stats {_mesh_bounds_str(green)}")
+    _stage_log("export", f"detail stats {_mesh_bounds_str(detail)}")
+    _stage_log("export", f"track stats {_mesh_bounds_str(track_inlay)}")
 
     _stage_log("export", f"exporting base -> {out_base}")
     _export_stl(base, out_base)
