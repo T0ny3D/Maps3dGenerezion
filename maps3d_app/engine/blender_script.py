@@ -416,12 +416,12 @@ def _make_layer_from_curves(curves: list[bpy.types.Object], terrain: bpy.types.O
         sw.use_positive_direction = True
         sw.use_negative_direction = True
         sw.offset = 0.25
-        bpy.context.view_layer.objects.active = c
-        bpy.ops.object.convert(target="MESH")
-        m = bpy.context.active_object
+        _set_object_active_selected(c)
+        m = _curve_to_mesh(c, c.name)
         solid = m.modifiers.new(name="Solid", type="SOLIDIFY")
         solid.thickness = max(0.4, thickness)
         solid.offset = 0.0
+        _set_object_active_selected(m)
         bpy.ops.object.modifier_apply(modifier=solid.name)
         meshes.append(m)
 
