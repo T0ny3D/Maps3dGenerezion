@@ -88,9 +88,9 @@ class MainWindow(QMainWindow):
 
         # Backend and quality
         self.backend = QComboBox()
-        self.backend.addItem("Blender (consigliato)", userData="blender")
-        self.backend.addItem("Python", userData="python")
-        idx = self.backend.findData("blender")
+        self.backend.addItem("Python (consigliato)", userData="python")
+        self.backend.addItem("Blender (legacy)", userData="blender")
+        idx = self.backend.findData("python")
         if idx >= 0:
             self.backend.setCurrentIndex(idx)
 
