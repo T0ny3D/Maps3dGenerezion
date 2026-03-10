@@ -182,7 +182,7 @@ def run_pipeline(
     dem_path: str | Path,
     stl_output_path: str | Path,
     config: GenerateConfig,
-    backend: str = "blender",
+    backend: str = "python",
     blender_exe_path: str | None = None,
 ) -> None:
     backend_norm = backend.strip().lower()

@@ -13,12 +13,12 @@ python -m maps3d_app
 
 ## Backend
 
-- **Blender (consigliato)**: qualità più alta, export multiplo, booleane complesse.
-- **Python**: fallback semplice.
+- **Python (consigliato)**: pipeline principale per generazione geometrie STL in coordinate canoniche.
+- **Blender (legacy)**: backend di compatibilità temporaneo durante la migrazione.
 
 ## Output “soluzione finale”
 
-Con backend Blender l’export produce:
+L’export Python-first produce:
 
 - `*_base_brown.stl` (terreno + base chiusa)
 - `*_water.stl` (layer acqua da OSM; fallback procedurale se OSM non disponibile)
