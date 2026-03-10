@@ -7,9 +7,11 @@ import numpy as np
 import rasterio
 from pyproj import Geod, Transformer
 import trimesh
+from shapely.geometry import GeometryCollection, LineString, MultiLineString, box
 
 from .gpx_loader import load_gpx_points
 from .mesh_builder import build_terrain_mesh, build_track_mesh
+from .model_space import ModelSpace
 
 _WGS84_GEOD = Geod(ellps="WGS84")
 
@@ -101,6 +103,45 @@ def _compute_bbox(points: np.ndarray, margin_ratio: float) -> tuple[float, float
     return minx - mx, miny - my, maxx + mx, maxy + my
 
 
+def _python_output_paths(stl_output_path: str | Path, test_mode: bool) -> tuple[Path, Path, Path]:
+    out = Path(stl_output_path)
+    suffix = "_test" if test_mode else ""
+    stem = out.stem
+    parent = out.parent
+    base_path = parent / f"{stem}{suffix}_base_brown.stl"
+    track_path = parent / f"{stem}{suffix}_track_inlay_red.stl"
+    combined_path = out
+    return base_path, track_path, combined_path
+
+
+def _clip_track_to_footprint(track_xy_mm: np.ndarray, model_width_mm: float, model_height_mm: float) -> list[np.ndarray]:
+    if len(track_xy_mm) < 2:
+        return []
+
+    footprint = box(0.0, 0.0, model_width_mm, model_height_mm)
+    clipped = LineString(track_xy_mm).intersection(footprint)
+
+    def _extract_segments(geom: object) -> list[np.ndarray]:
+        if isinstance(geom, LineString):
+            coords = np.asarray(geom.coords, dtype=np.float64)
+            return [coords] if len(coords) >= 2 else []
+        if isinstance(geom, MultiLineString):
+            segs: list[np.ndarray] = []
+            for line in geom.geoms:
+                coords = np.asarray(line.coords, dtype=np.float64)
+                if len(coords) >= 2:
+                    segs.append(coords)
+            return segs
+        if isinstance(geom, GeometryCollection):
+            segs: list[np.ndarray] = []
+            for child in geom.geoms:
+                segs.extend(_extract_segments(child))
+            return segs
+        return []
+
+    return _extract_segments(clipped)
+
+
 def run_python_pipeline(
     gpx_path: str | Path,
     dem_path: str | Path,
@@ -144,37 +185,64 @@ def run_python_pipeline(
 
         x_min, x_max = float(np.min(x_coords)), float(np.max(x_coords))
         y_min, y_max = float(np.min(y_coords)), float(np.max(y_coords))
-        dx = max(abs(x_max - x_min), 1e-6)
-        dy = max(abs(y_max - y_min), 1e-6)
 
-        x_mm = (x_coords - min(x_min, x_max)) / dx * config.model_width_mm
-        y_mm = (y_coords - min(y_min, y_max)) / dy * config.model_height_mm
-        y_mm = np.sort(y_mm)
-        if y_coords[0] > y_coords[-1]:
+        model_space = ModelSpace.from_source_bounds(
+            src_min_x=x_min,
+            src_max_x=x_max,
+            src_min_y=y_min,
+            src_max_y=y_max,
+            model_width_mm=config.model_width_mm,
+            model_height_mm=config.model_height_mm,
+        )
+
+        x_mm = model_space.to_model_x(x_coords)
+        y_mm = model_space.to_model_y(y_coords)
+
+        if x_mm[0] > x_mm[-1]:
+            x_mm = x_mm[::-1]
+            dem = np.fliplr(dem)
+        if y_mm[0] > y_mm[-1]:
+            y_mm = y_mm[::-1]
             dem = np.flipud(dem)
 
         horiz_scale_mm_per_meter = _model_horizontal_scale_mm_per_meter(ds, window, config.model_width_mm, config.model_height_mm)
         z_mm = (dem - min_elev) * horiz_scale_mm_per_meter * config.vertical_scale
 
-        track_x_mm = (points_dem[:, 0] - min(x_min, x_max)) / dx * config.model_width_mm
-        track_y_mm = (points_dem[:, 1] - min(y_min, y_max)) / dy * config.model_height_mm
-        track_xy_mm = np.column_stack((track_x_mm, track_y_mm))
+        track_xy_mm = model_space.to_model_xy(points_dem)
 
     terrain_mesh = build_terrain_mesh(x_mm=x_mm, y_mm=y_mm, z_mm=z_mm, base_thickness_mm=config.base_thickness_mm)
-    track_mesh = build_track_mesh(
-        track_xy_mm=track_xy_mm,
-        x_mm=x_mm,
-        y_mm=y_mm,
-        z_mm=z_mm,
-        track_height_mm=config.track_height_mm,
+
+    clipped_segments = _clip_track_to_footprint(track_xy_mm, config.model_width_mm, config.model_height_mm)
+    track_segments = [
+        build_track_mesh(
+            track_xy_mm=segment,
+            x_mm=x_mm,
+            y_mm=y_mm,
+            z_mm=z_mm,
+            track_height_mm=config.track_height_mm,
+        )
+        for segment in clipped_segments
+    ]
+    track_segments = [m for m in track_segments if m.faces.shape[0] > 0]
+    track_mesh = (
+        trimesh.util.concatenate(track_segments)
+        if track_segments
+        else trimesh.Trimesh(vertices=np.zeros((0, 3)), faces=np.zeros((0, 3), dtype=np.int64), process=False)
     )
 
-    final_mesh = trimesh.util.concatenate([terrain_mesh, track_mesh])
-    if final_mesh.faces.shape[0] == 0:
-        raise ValueError("Mesh vuota, impossibile esportare STL.")
+    if terrain_mesh.faces.shape[0] == 0:
+        raise ValueError("Mesh base vuota, impossibile esportare STL.")
 
-    Path(stl_output_path).parent.mkdir(parents=True, exist_ok=True)
-    final_mesh.export(stl_output_path)
+    out_base, out_track, out_combined = _python_output_paths(stl_output_path, config.test_mode)
+    out_base.parent.mkdir(parents=True, exist_ok=True)
+    terrain_mesh.export(out_base)
+
+    if track_mesh.faces.shape[0] > 0:
+        track_mesh.export(out_track)
+
+    combined_meshes = [terrain_mesh] + ([track_mesh] if track_mesh.faces.shape[0] > 0 else [])
+    final_mesh = trimesh.util.concatenate(combined_meshes)
+    final_mesh.export(out_combined)
 
 
 def run_pipeline(
