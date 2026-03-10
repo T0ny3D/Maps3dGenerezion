@@ -527,11 +527,19 @@ def _build_ams_layers(job: dict, terrain_top: bpy.types.Object) -> tuple[bpy.typ
     water_lines, _, _ = _fit_lines_to_terrain(water_lines, terrain_span_x, terrain_span_y, "water")
     green_lines, _, _ = _fit_lines_to_terrain(green_lines, terrain_span_x, terrain_span_y, "green")
     detail_lines, _, _ = _fit_lines_to_terrain(detail_lines, terrain_span_x, terrain_span_y, "detail")
+ codex/fix-output-fidelity-in-map-generation-q3zkep
 
     water_curves = _curves_from_lines([[list(p) for p in line] for line in water_lines], "WaterCurve", 1.4)
     green_curves = _curves_from_lines([[list(p) for p in line] for line in green_lines], "GreenCurve", 1.8)
     detail_curves = _curves_from_lines([[list(p) for p in line] for line in detail_lines], "DetailCurve", 0.45)
 
+
+
+    water_curves = _curves_from_lines([[list(p) for p in line] for line in water_lines], "WaterCurve", 1.4)
+    green_curves = _curves_from_lines([[list(p) for p in line] for line in green_lines], "GreenCurve", 1.8)
+    detail_curves = _curves_from_lines([[list(p) for p in line] for line in detail_lines], "DetailCurve", 0.45)
+
+ main
     allow_fallback = bool(job.get("ams_allow_fallback", False))
     real_layers_present = bool(water_curves or green_curves or detail_curves)
 
@@ -633,10 +641,16 @@ def _create_test_frame_corner(job: dict) -> bpy.types.Object:
     return frame
 
 
+ codex/fix-output-fidelity-in-map-generation-q3zkep
 
 def _mesh_bounds(obj: bpy.types.Object | None) -> tuple[float, float, float, float, float, float] | None:
     if obj is None or obj.type != "MESH" or obj.data is None or len(obj.data.vertices) == 0:
         return None
+
+def _mesh_bounds_str(obj: bpy.types.Object | None) -> str:
+    if obj is None or obj.type != "MESH" or obj.data is None or len(obj.data.vertices) == 0:
+        return "none"
+ main
     xs: list[float] = []
     ys: list[float] = []
     zs: list[float] = []
@@ -645,6 +659,7 @@ def _mesh_bounds(obj: bpy.types.Object | None) -> tuple[float, float, float, flo
         xs.append(float(c.x))
         ys.append(float(c.y))
         zs.append(float(c.z))
+ codex/fix-output-fidelity-in-map-generation-q3zkep
     return min(xs), max(xs), min(ys), max(ys), min(zs), max(zs)
 
 
@@ -707,6 +722,10 @@ def _mesh_bounds_str(obj: bpy.types.Object | None) -> str:
     x0, x1, y0, y1, z0, z1 = b
     return (
         f"bbox=({x0:.3f},{x1:.3f},{y0:.3f},{y1:.3f},{z0:.3f},{z1:.3f}) "
+
+    return (
+        f"bbox=({min(xs):.3f},{max(xs):.3f},{min(ys):.3f},{max(ys):.3f},{min(zs):.3f},{max(zs):.3f}) "
+ main
         f"dims=({obj.dimensions.x:.3f},{obj.dimensions.y:.3f},{obj.dimensions.z:.3f}) polys={len(obj.data.polygons)}"
     )
 
@@ -792,11 +811,14 @@ def main() -> None:
         if track_inlay is not None:
             track_inlay = _make_test_map(track_inlay, ts, sx, sy)
 
+ codex/fix-output-fidelity-in-map-generation-q3zkep
     water = _enforce_xy_footprint(water, base, "water")
     green = _enforce_xy_footprint(green, base, "green")
     detail = _enforce_xy_footprint(detail, base, "detail")
     track_inlay = _enforce_xy_footprint(track_inlay, base, "track")
 
+
+ main
     _stage_log("export", f"base stats {_mesh_bounds_str(base)}")
     _stage_log("export", f"water stats {_mesh_bounds_str(water)}")
     _stage_log("export", f"green stats {_mesh_bounds_str(green)}")
