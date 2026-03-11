@@ -13,10 +13,8 @@ import trimesh
 from shapely.geometry import GeometryCollection, LineString, MultiLineString, box
 
 from .gpx_loader import load_gpx_points
- codex/transition-to-python-based-stl-generation-pipeline-3fu0a3
 from .mesh_builder import build_line_layer_mesh, build_rect_frame_mesh, build_terrain_mesh
 
- codex/transition-to-python-based-stl-generation-pipeline-d8wahe
 from .mesh_builder import build_line_layer_mesh, build_terrain_mesh
 
 from .mesh_builder import build_terrain_mesh, build_track_mesh
@@ -114,10 +112,8 @@ def _compute_bbox(points: np.ndarray, margin_ratio: float) -> tuple[float, float
     return minx - mx, miny - my, maxx + mx, maxy + my
 
 
- codex/transition-to-python-based-stl-generation-pipeline-3fu0a3
 def _python_output_paths(stl_output_path: str | Path, test_mode: bool) -> dict[str, Path]:
 
- codex/transition-to-python-based-stl-generation-pipeline-d8wahe
 def _python_output_paths(stl_output_path: str | Path, test_mode: bool) -> dict[str, Path]:
 
 def _python_output_paths(stl_output_path: str | Path, test_mode: bool) -> tuple[Path, Path, Path]:
@@ -127,9 +123,7 @@ def _python_output_paths(stl_output_path: str | Path, test_mode: bool) -> tuple[
     suffix = "_test" if test_mode else ""
     stem = out.stem
     parent = out.parent
- codex/transition-to-python-based-stl-generation-pipeline-3fu0a3
 
- codex/transition-to-python-based-stl-generation-pipeline-d8wahe
  main
     return {
         "base": parent / f"{stem}{suffix}_base_brown.stl",
@@ -137,7 +131,6 @@ def _python_output_paths(stl_output_path: str | Path, test_mode: bool) -> tuple[
         "green": parent / f"{stem}{suffix}_green.stl",
         "detail": parent / f"{stem}{suffix}_detail.stl",
         "track": parent / f"{stem}{suffix}_track_inlay_red.stl",
- codex/transition-to-python-based-stl-generation-pipeline-3fu0a3
         "frame": parent / f"{stem}{suffix}_frame.stl",
 
  main
@@ -146,7 +139,6 @@ def _python_output_paths(stl_output_path: str | Path, test_mode: bool) -> tuple[
 
 
 def _clip_polyline_to_footprint(track_xy_mm: np.ndarray, model_width_mm: float, model_height_mm: float) -> list[np.ndarray]:
- codex/transition-to-python-based-stl-generation-pipeline-3fu0a3
 
 
     base_path = parent / f"{stem}{suffix}_base_brown.stl"
@@ -185,9 +177,7 @@ def _clip_track_to_footprint(track_xy_mm: np.ndarray, model_width_mm: float, mod
     return _extract_segments(clipped)
 
 
- codex/transition-to-python-based-stl-generation-pipeline-3fu0a3
 
- codex/transition-to-python-based-stl-generation-pipeline-d8wahe
  main
 def _fetch_osm_line_layers(points_lonlat: np.ndarray, to_dem: Transformer, model_space: ModelSpace) -> dict[str, list[np.ndarray]]:
     min_lon = float(np.min(points_lonlat[:, 0]))
@@ -241,7 +231,6 @@ out geom;
 
 
 
- codex/transition-to-python-based-stl-generation-pipeline-3fu0a3
 
 def _export_mesh_or_remove(path: Path, mesh: trimesh.Trimesh) -> None:
     if mesh.faces.shape[0] > 0:
@@ -321,9 +310,7 @@ def run_python_pipeline(
         z_mm = (dem - min_elev) * horiz_scale_mm_per_meter * config.vertical_scale
 
         track_xy_mm = model_space.to_model_xy(points_dem)
- codex/transition-to-python-based-stl-generation-pipeline-3fu0a3
 
- codex/transition-to-python-based-stl-generation-pipeline-d8wahe
  main
         osm_layers = _fetch_osm_line_layers(points_lonlat, to_dem=to_dem, model_space=model_space)
 
@@ -337,7 +324,6 @@ def run_python_pipeline(
         z_mm=z_mm,
         layer_height_mm=config.track_height_mm,
         layer_width_mm=1.2,
- codex/transition-to-python-based-stl-generation-pipeline-3fu0a3
 
     )
 
@@ -410,7 +396,6 @@ def run_python_pipeline(
     out_paths = _python_output_paths(stl_output_path, config.test_mode)
     out_paths["base"].parent.mkdir(parents=True, exist_ok=True)
 
- codex/transition-to-python-based-stl-generation-pipeline-d8wahe
     terrain_mesh.export(out_paths["base"])
     if track_mesh.faces.shape[0] > 0:
         track_mesh.export(out_paths["track"])
@@ -435,7 +420,6 @@ def run_python_pipeline(
     out_base.parent.mkdir(parents=True, exist_ok=True)
     terrain_mesh.export(out_base)
 
- codex/transition-to-python-based-stl-generation-pipeline-3fu0a3
     clipped_water_segments = [
         seg
         for src in osm_layers["water"]
