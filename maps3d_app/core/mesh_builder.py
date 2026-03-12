@@ -139,3 +139,70 @@ def build_track_mesh(
         return trimesh.Trimesh(vertices=np.zeros((0, 3)), faces=np.zeros((0, 3), dtype=np.int64), process=False)
 
     return trimesh.Trimesh(vertices=np.asarray(vertices), faces=np.asarray(faces, dtype=np.int64), process=False)
+
+
+def build_line_layer_mesh(
+    line_segments_xy_mm: list[np.ndarray],
+    x_mm: np.ndarray,
+    y_mm: np.ndarray,
+    z_mm: np.ndarray,
+    layer_height_mm: float,
+    layer_width_mm: float,
+) -> trimesh.Trimesh:
+    meshes: list[trimesh.Trimesh] = []
+    for segment in line_segments_xy_mm:
+        if len(segment) < 2:
+            continue
+        mesh = build_track_mesh(
+            track_xy_mm=segment,
+            x_mm=x_mm,
+            y_mm=y_mm,
+            z_mm=z_mm,
+            track_height_mm=layer_height_mm,
+            track_width_mm=layer_width_mm,
+        )
+        if mesh.faces.shape[0] > 0:
+            meshes.append(mesh)
+
+    if not meshes:
+        return trimesh.Trimesh(vertices=np.zeros((0, 3)), faces=np.zeros((0, 3), dtype=np.int64), process=False)
+
+    return trimesh.util.concatenate(meshes)
+
+
+
+def _box_mesh(min_x: float, max_x: float, min_y: float, max_y: float, min_z: float, max_z: float) -> trimesh.Trimesh:
+    size = np.array([max_x - min_x, max_y - min_y, max_z - min_z], dtype=np.float64)
+    center = np.array([(min_x + max_x) * 0.5, (min_y + max_y) * 0.5, (min_z + max_z) * 0.5], dtype=np.float64)
+    return trimesh.creation.box(extents=size, transform=trimesh.transformations.translation_matrix(center))
+
+
+def build_rect_frame_mesh(
+    model_width_mm: float,
+    model_height_mm: float,
+    frame_wall_mm: float,
+    frame_height_mm: float,
+    clearance_mm: float,
+    base_thickness_mm: float,
+) -> trimesh.Trimesh:
+    inner_min_x = -clearance_mm
+    inner_max_x = model_width_mm + clearance_mm
+    inner_min_y = -clearance_mm
+    inner_max_y = model_height_mm + clearance_mm
+
+    outer_min_x = inner_min_x - frame_wall_mm
+    outer_max_x = inner_max_x + frame_wall_mm
+    outer_min_y = inner_min_y - frame_wall_mm
+    outer_max_y = inner_max_y + frame_wall_mm
+
+    min_z = -base_thickness_mm
+    max_z = frame_height_mm
+
+    parts = [
+        _box_mesh(outer_min_x, outer_max_x, outer_min_y, inner_min_y, min_z, max_z),
+        _box_mesh(outer_min_x, outer_max_x, inner_max_y, outer_max_y, min_z, max_z),
+        _box_mesh(outer_min_x, inner_min_x, inner_min_y, inner_max_y, min_z, max_z),
+        _box_mesh(inner_max_x, outer_max_x, inner_min_y, inner_max_y, min_z, max_z),
+    ]
+
+    return trimesh.util.concatenate(parts)
