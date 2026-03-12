@@ -22,12 +22,21 @@ from .model_space import ModelSpace
 _WGS84_GEOD = Geod(ellps="WGS84")
 _RELIEF_DETAIL_BOOST = 0.45
 _RELIEF_GAMMA = 0.88
+_RELIEF_SMOOTH_RADIUS = 1
 _TRACK_SIMPLIFY_TOL_MM = 0.25
 _TRACK_RESAMPLE_MM = 0.8
 _TRACK_MIN_LENGTH_MM = 2.0
 _TRACK_MIN_WIDTH_MM = 1.4
 _TRACK_MAX_WIDTH_MM = 3.0
 _TRACK_CLEARANCE_MULTIPLIER = 2.0
+_WATERWAY_TYPES = {"river", "canal", "stream"}
+_GREEN_LANDUSE = {"forest", "meadow", "grass", "wood"}
+_GREEN_LEISURE = {"park", "garden"}
+_HIGHWAY_TYPES = {"motorway", "trunk", "primary", "secondary"}
+_WATERWAY_QUERY = "|".join(sorted(_WATERWAY_TYPES))
+_GREEN_LANDUSE_QUERY = "|".join(sorted(_GREEN_LANDUSE))
+_GREEN_LEISURE_QUERY = "|".join(sorted(_GREEN_LEISURE))
+_HIGHWAY_QUERY = "|".join(sorted(_HIGHWAY_TYPES))
 _WATER_SIMPLIFY_TOL_MM = 0.4
 _WATER_RESAMPLE_MM = 1.2
 _WATER_MIN_LENGTH_MM = 5.0
@@ -75,15 +84,14 @@ def _extract_line_segments(geom: object) -> list[np.ndarray]:
     if isinstance(geom, LineString):
         coords = np.asarray(geom.coords, dtype=np.float64)
         return [coords] if len(coords) >= 2 else []
+    segments: list[np.ndarray] = []
     if isinstance(geom, MultiLineString):
-        segments: list[np.ndarray] = []
         for line in geom.geoms:
             coords = np.asarray(line.coords, dtype=np.float64)
             if len(coords) >= 2:
                 segments.append(coords)
         return segments
     if isinstance(geom, GeometryCollection):
-        segments: list[np.ndarray] = []
         for child in geom.geoms:
             segments.extend(_extract_line_segments(child))
         return segments
@@ -205,7 +213,7 @@ def _enhance_dem_relief(dem: np.ndarray) -> np.ndarray:
     if span <= 1e-6:
         return dem
     norm = (dem - min_elev) / span
-    smooth = _box_filter(norm, radius=1)
+    smooth = _box_filter(norm, radius=_RELIEF_SMOOTH_RADIUS)
     detail = norm - smooth
     boosted = np.clip(norm + detail * _RELIEF_DETAIL_BOOST, 0.0, 1.0)
     adjusted = np.power(boosted, _RELIEF_GAMMA)
@@ -329,10 +337,10 @@ def _fetch_osm_line_layers(points_lonlat: np.ndarray, to_dem: Transformer, model
 [out:json][timeout:25];
 (
   way["natural"="water"]({s},{w},{n},{e});
-  way["waterway"~"river|canal|stream"]({s},{w},{n},{e});
-  way["landuse"~"forest|meadow|grass|wood"]({s},{w},{n},{e});
-  way["leisure"~"park|garden"]({s},{w},{n},{e});
-  way["highway"~"motorway|trunk|primary|secondary"]({s},{w},{n},{e});
+  way["waterway"~"{_WATERWAY_QUERY}"]({s},{w},{n},{e});
+  way["landuse"~"{_GREEN_LANDUSE_QUERY}"]({s},{w},{n},{e});
+  way["leisure"~"{_GREEN_LEISURE_QUERY}"]({s},{w},{n},{e});
+  way["highway"~"{_HIGHWAY_QUERY}"]({s},{w},{n},{e});
 );
 out geom;
 """
@@ -358,11 +366,11 @@ out geom;
         tags = el.get("tags", {})
         waterway = tags.get("waterway")
         highway = tags.get("highway")
-        if tags.get("natural") == "water" or waterway in {"river", "canal", "stream"}:
+        if tags.get("natural") == "water" or waterway in _WATERWAY_TYPES:
             layers["water"].append(model_xy)
-        elif tags.get("landuse") in {"forest", "meadow", "grass", "wood"} or tags.get("leisure") in {"park", "garden"}:
+        elif tags.get("landuse") in _GREEN_LANDUSE or tags.get("leisure") in _GREEN_LEISURE:
             layers["green"].append(model_xy)
-        elif highway in {"motorway", "trunk", "primary", "secondary"}:
+        elif highway in _HIGHWAY_TYPES:
             layers["detail"].append(model_xy)
 
     return layers

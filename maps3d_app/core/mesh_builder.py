@@ -5,6 +5,7 @@ import trimesh
 
 
 _TRACK_BASE_OFFSET_MM = 0.08
+_TRACK_SMOOTH_WINDOW = 5
 
 
 def _grid_index(row: int, col: int, cols: int) -> int:
@@ -14,10 +15,10 @@ def _grid_index(row: int, col: int, cols: int) -> int:
 def _smooth_series(values: np.ndarray, window: int = 5) -> np.ndarray:
     if window <= 1 or values.size < 3:
         return values
+    window = min(window, values.size)
     if window % 2 == 0:
-        window += 1
-    window = min(window, values.size if values.size % 2 == 1 else values.size - 1)
-    if window <= 1:
+        window -= 1
+    if window < 3:
         return values
     pad = window // 2
     padded = np.pad(values, pad, mode="edge")
@@ -115,7 +116,7 @@ def build_track_mesh(
         [sample_height_on_grid(x_mm, y_mm, z_mm, p[0], p[1]) for p in track_xy_mm],
         dtype=np.float64,
     )
-    z_samples = _smooth_series(z_samples, window=5) + _TRACK_BASE_OFFSET_MM
+    z_samples = _smooth_series(z_samples, window=_TRACK_SMOOTH_WINDOW) + _TRACK_BASE_OFFSET_MM
 
     for i in range(len(track_xy_mm) - 1):
         p0 = track_xy_mm[i]
