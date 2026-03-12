@@ -1,11 +1,19 @@
 # -*- mode: python ; coding: utf-8 -*-
+# sanitized for merge artifacts
 
 from PyInstaller.utils.hooks import collect_all, collect_submodules
 
 block_cipher = None
 
-hiddenimports = collect_submodules("maps3d_app")
-hiddenimports.append("maps3d_app.core.blender_backend")
+hiddenimports: list[str] = []
+hiddenimports += collect_submodules("maps3d_app")
+hiddenimports += collect_submodules("maps3d_app.core")
+hiddenimports += [
+    "maps3d_app.core.blender_backend",
+    "maps3d_app.core.mesh_builder",
+    "maps3d_app.core.pipeline",
+    "maps3d_app.ui.main_window",
+]
 
 # Keep deterministic order and remove duplicates.
 hiddenimports = list(dict.fromkeys(hiddenimports))
