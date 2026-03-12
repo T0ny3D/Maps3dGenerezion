@@ -200,6 +200,22 @@ def _compute_dem_metrics(
     )
 
 
+def _normalize_osm_layer_lines(
+    raw_lines: list[list[list[float]]],
+    simplify_tolerance_mm: float,
+    resample_spacing_mm: float,
+    min_length_mm: float,
+) -> list[list[list[float]]]:
+    arrays = [np.asarray(line, dtype=np.float64) for line in raw_lines if len(line) >= 2]
+    normalized = _normalize_line_segments(
+        arrays,
+        simplify_tolerance_mm=simplify_tolerance_mm,
+        resample_spacing_mm=resample_spacing_mm,
+        min_length_mm=min_length_mm,
+    )
+    return [[[float(p[0]), float(p[1])] for p in segment] for segment in normalized]
+
+
 def _fetch_osm_layers(points_lonlat: np.ndarray, model_w: float, model_h: float) -> dict[str, list[list[list[float]]]]:
     min_lon, min_lat = np.min(points_lonlat[:, 0]), np.min(points_lonlat[:, 1])
     max_lon, max_lat = np.min(points_lonlat[:, 0]), np.max(points_lonlat[:, 1])  # safe
@@ -245,35 +261,20 @@ out geom;
             layers["green"].append(line)
         elif highway in _HIGHWAY_TYPES:
             layers["detail"].append(line)
-    def _normalize_layer(
-        raw_lines: list[list[list[float]]],
-        simplify_tolerance_mm: float,
-        resample_spacing_mm: float,
-        min_length_mm: float,
-    ) -> list[list[list[float]]]:
-        arrays = [np.asarray(line, dtype=np.float64) for line in raw_lines if len(line) >= 2]
-        normalized = _normalize_line_segments(
-            arrays,
-            simplify_tolerance_mm=simplify_tolerance_mm,
-            resample_spacing_mm=resample_spacing_mm,
-            min_length_mm=min_length_mm,
-        )
-        return [[[float(p[0]), float(p[1])] for p in segment] for segment in normalized]
-
     return {
-        "water": _normalize_layer(
+        "water": _normalize_osm_layer_lines(
             layers["water"],
             simplify_tolerance_mm=_WATER_SIMPLIFY_TOL_MM,
             resample_spacing_mm=_WATER_RESAMPLE_MM,
             min_length_mm=_WATER_MIN_LENGTH_MM,
         ),
-        "green": _normalize_layer(
+        "green": _normalize_osm_layer_lines(
             layers["green"],
             simplify_tolerance_mm=_GREEN_SIMPLIFY_TOL_MM,
             resample_spacing_mm=_GREEN_RESAMPLE_MM,
             min_length_mm=_GREEN_MIN_LENGTH_MM,
         ),
-        "detail": _normalize_layer(
+        "detail": _normalize_osm_layer_lines(
             layers["detail"],
             simplify_tolerance_mm=_DETAIL_SIMPLIFY_TOL_MM,
             resample_spacing_mm=_DETAIL_RESAMPLE_MM,
