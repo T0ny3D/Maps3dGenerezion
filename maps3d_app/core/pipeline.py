@@ -205,6 +205,8 @@ out geom;
 
 
 
+
+ main
  main
  main
 def _export_mesh_or_remove(path: Path, mesh: trimesh.Trimesh) -> None:
@@ -321,6 +323,7 @@ def run_python_pipeline(
         layer_width_mm=1.8,
 
 
+
         x_mm=x_mm,
         y_mm=y_mm,
         z_mm=z_mm,
@@ -342,6 +345,7 @@ def run_python_pipeline(
         z_mm=z_mm,
         layer_height_mm=0.4,
         layer_width_mm=0.9,
+ main
  main
  main
     )

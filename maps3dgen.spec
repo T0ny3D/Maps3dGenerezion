@@ -1,4 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
+# sanitized for merge artifacts
 
 from PyInstaller.utils.hooks import collect_all, collect_submodules
 
@@ -14,9 +15,11 @@ hiddenimports += [
     "maps3d_app.ui.main_window",
 ]
 
+
 hiddenimports = collect_submodules("maps3d_app")
 hiddenimports.append("maps3d_app.core.blender_backend")
 hiddenimports.append("maps3d_app.core.pipeline")
+ main
  main
 
 # Keep deterministic order and remove duplicates.
