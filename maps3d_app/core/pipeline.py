@@ -20,9 +20,9 @@ from .mesh_builder import build_line_layer_mesh, build_rect_frame_mesh, build_te
 from .model_space import ModelSpace
 
 _WGS84_GEOD = Geod(ellps="WGS84")
-_RELIEF_DETAIL_BOOST = 0.45
-_RELIEF_GAMMA = 0.88
-_RELIEF_SMOOTH_RADIUS = 1
+_RELIEF_DETAIL_BOOST = 0.45  # Unsharp-mask strength for terrain detail.
+_RELIEF_GAMMA = 0.88  # Gamma lift to improve relief readability.
+_RELIEF_SMOOTH_RADIUS = 1  # Box-filter radius used before detail boost.
 _TRACK_SIMPLIFY_TOL_MM = 0.25
 _TRACK_RESAMPLE_MM = 0.8
 _TRACK_MIN_LENGTH_MM = 2.0
@@ -439,10 +439,11 @@ def run_python_pipeline(
         resample_spacing_mm=_TRACK_RESAMPLE_MM,
         min_length_mm=_TRACK_MIN_LENGTH_MM,
     )
-    track_width_mm = max(
-        _TRACK_MIN_WIDTH_MM,
+    raw_track_width_mm = max(
+        0.0,
         config.groove_width_mm - _TRACK_CLEARANCE_MULTIPLIER * config.track_clearance_mm,
     )
+    track_width_mm = max(_TRACK_MIN_WIDTH_MM, raw_track_width_mm)
     track_mesh = build_line_layer_mesh(
         line_segments_xy_mm=clipped_track_segments,
         x_mm=x_mm,
