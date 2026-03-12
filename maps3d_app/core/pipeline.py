@@ -20,17 +20,20 @@ from .mesh_builder import build_line_layer_mesh, build_rect_frame_mesh, build_te
 from .model_space import ModelSpace
 
 _WGS84_GEOD = Geod(ellps="WGS84")
-_RELIEF_DETAIL_BOOST = 0.6  # Unsharp-mask strength for terrain detail.
-_RELIEF_GAMMA = 0.84  # Gamma lift to improve relief readability.
-_RELIEF_SMOOTH_RADIUS = 2  # Box-filter radius used before detail boost.
+_RELIEF_DETAIL_BOOST_FINE = 0.85  # Unsharp-mask strength for micro detail.
+_RELIEF_DETAIL_BOOST_COARSE = 0.45  # Medium-scale ridge emphasis.
+_RELIEF_GAMMA = 0.78  # Gamma lift to improve relief readability.
+_RELIEF_CONTRAST = 1.18  # S-curve contrast for stronger relief separation.
+_RELIEF_SMOOTH_RADIUS_FINE = 1  # Box-filter radius for micro relief.
+_RELIEF_SMOOTH_RADIUS_COARSE = 5  # Box-filter radius for macro relief.
 _RELIEF_MAX_CELLS = 2_000_000
-_TRACK_SIMPLIFY_TOL_MM = 0.4
-_TRACK_RESAMPLE_MM = 0.7
-_TRACK_MIN_LENGTH_MM = 2.0
-_TRACK_MIN_WIDTH_MM = 1.4
-_TRACK_MAX_WIDTH_MM = 3.0
+_TRACK_SIMPLIFY_TOL_MM = 0.65
+_TRACK_RESAMPLE_MM = 0.9
+_TRACK_MIN_LENGTH_MM = 3.0
+_TRACK_MIN_WIDTH_MM = 1.5
+_TRACK_MAX_WIDTH_MM = 3.2
 _TRACK_CLEARANCE_MULTIPLIER = 2.0
-_WATERWAY_TYPES = {"river", "canal", "stream"}
+_WATERWAY_TYPES = {"river", "canal"}
 _GREEN_LANDUSE = {"forest", "meadow", "grass", "wood"}
 _GREEN_LEISURE = {"park", "garden"}
 _HIGHWAY_TYPES = {"motorway", "trunk", "primary"}
@@ -38,15 +41,30 @@ _WATERWAY_QUERY = "|".join(sorted(_WATERWAY_TYPES))
 _GREEN_LANDUSE_QUERY = "|".join(sorted(_GREEN_LANDUSE))
 _GREEN_LEISURE_QUERY = "|".join(sorted(_GREEN_LEISURE))
 _HIGHWAY_QUERY = "|".join(sorted(_HIGHWAY_TYPES))
-_WATER_SIMPLIFY_TOL_MM = 0.7
-_WATER_RESAMPLE_MM = 1.8
-_WATER_MIN_LENGTH_MM = 8.0
-_GREEN_SIMPLIFY_TOL_MM = 0.75
-_GREEN_RESAMPLE_MM = 2.0
-_GREEN_MIN_LENGTH_MM = 9.0
-_DETAIL_SIMPLIFY_TOL_MM = 0.9
-_DETAIL_RESAMPLE_MM = 2.4
-_DETAIL_MIN_LENGTH_MM = 10.0
+_WATER_SIMPLIFY_TOL_MM = 1.0
+_WATER_RESAMPLE_MM = 2.4
+_WATER_MIN_LENGTH_MM = 14.0
+_GREEN_SIMPLIFY_TOL_MM = 1.05
+_GREEN_RESAMPLE_MM = 2.6
+_GREEN_MIN_LENGTH_MM = 12.0
+_DETAIL_SIMPLIFY_TOL_MM = 1.4
+_DETAIL_RESAMPLE_MM = 3.2
+_DETAIL_MIN_LENGTH_MM = 18.0
+_WATER_MAX_SEGMENTS = 6
+_GREEN_MAX_SEGMENTS = 8
+_DETAIL_MAX_SEGMENTS = 5
+_WATER_MAX_TOTAL_RATIO = 1.6
+_GREEN_MAX_TOTAL_RATIO = 1.35
+_DETAIL_MAX_TOTAL_RATIO = 1.1
+_WATER_MIN_SPAN_RATIO = 0.18
+_GREEN_MIN_SPAN_RATIO = 0.12
+_DETAIL_MIN_SPAN_RATIO = 0.2
+_WATER_LAYER_HEIGHT_MM = 1.2
+_WATER_LAYER_WIDTH_MM = 2.9
+_GREEN_LAYER_HEIGHT_MM = 1.1
+_GREEN_LAYER_WIDTH_MM = 2.4
+_DETAIL_LAYER_HEIGHT_MM = 0.25
+_DETAIL_LAYER_WIDTH_MM = 0.55
 
 
 def _model_horizontal_scale_mm_per_meter(ds: rasterio.io.DatasetReader, window: rasterio.windows.Window, model_width_mm: float, model_height_mm: float) -> float:
@@ -209,6 +227,14 @@ def _box_filter(values: np.ndarray, radius: int = 1) -> np.ndarray:
     return windows.mean(axis=(-1, -2))
 
 
+def _relief_contrast(values: np.ndarray, strength: float) -> np.ndarray:
+    if strength <= 0:
+        return values
+    centered = values - 0.5
+    adjusted = 0.5 + np.tanh(centered * strength) * 0.5
+    return np.clip(adjusted, 0.0, 1.0)
+
+
 def _enhance_dem_relief(dem: np.ndarray) -> np.ndarray:
     min_elev = float(np.nanmin(dem))
     max_elev = float(np.nanmax(dem))
@@ -216,10 +242,14 @@ def _enhance_dem_relief(dem: np.ndarray) -> np.ndarray:
     if span <= 1e-6:
         return dem
     norm = (dem - min_elev) / span
-    smooth = _box_filter(norm, radius=_RELIEF_SMOOTH_RADIUS)
-    detail = norm - smooth
-    boosted = np.clip(norm + detail * _RELIEF_DETAIL_BOOST, 0.0, 1.0)
-    adjusted = np.power(boosted, _RELIEF_GAMMA)
+    smooth_fine = _box_filter(norm, radius=_RELIEF_SMOOTH_RADIUS_FINE)
+    smooth_coarse = _box_filter(norm, radius=_RELIEF_SMOOTH_RADIUS_COARSE)
+    detail_fine = norm - smooth_fine
+    detail_coarse = smooth_fine - smooth_coarse
+    boosted = norm + detail_fine * _RELIEF_DETAIL_BOOST_FINE + detail_coarse * _RELIEF_DETAIL_BOOST_COARSE
+    boosted = np.clip(boosted, 0.0, 1.0)
+    contrasted = _relief_contrast(boosted, _RELIEF_CONTRAST)
+    adjusted = np.power(contrasted, _RELIEF_GAMMA)
     return adjusted * span + min_elev
 
 
@@ -325,6 +355,60 @@ def _normalize_line_segments(
             if len(coords) >= 2 and _line_length(coords) >= min_length_mm:
                 normalized.append(coords)
     return normalized
+
+
+def _segment_bounds(points: np.ndarray) -> tuple[float, float, float, float]:
+    min_xy = np.min(points, axis=0)
+    max_xy = np.max(points, axis=0)
+    return float(min_xy[0]), float(min_xy[1]), float(max_xy[0]), float(max_xy[1])
+
+
+def _segment_span_ratio(points: np.ndarray, model_span_mm: float) -> float:
+    if model_span_mm <= 0:
+        return 0.0
+    min_x, min_y, max_x, max_y = _segment_bounds(points)
+    diag = float(np.hypot(max_x - min_x, max_y - min_y))
+    return diag / model_span_mm
+
+
+def _select_top_segments(
+    segments: list[np.ndarray],
+    model_width_mm: float,
+    model_height_mm: float,
+    max_segments: int,
+    min_length_mm: float,
+    max_total_length_mm: float,
+    min_span_ratio: float,
+) -> list[np.ndarray]:
+    if not segments:
+        return []
+    model_span = max(model_width_mm, model_height_mm, 1e-6)
+    scored: list[tuple[float, float, np.ndarray]] = []
+    for segment in segments:
+        length = _line_length(segment)
+        if length < min_length_mm:
+            continue
+        span_ratio = _segment_span_ratio(segment, model_span)
+        if span_ratio < min_span_ratio:
+            continue
+        score = length * (0.65 + span_ratio)
+        scored.append((score, length, segment))
+
+    if not scored:
+        longest = max(segments, key=_line_length)
+        return [longest] if _line_length(longest) > 0 else []
+
+    scored.sort(key=lambda item: item[0], reverse=True)
+    selected: list[np.ndarray] = []
+    total_length = 0.0
+    for _, length, segment in scored:
+        if len(selected) >= max_segments:
+            break
+        if total_length + length > max_total_length_mm and selected:
+            continue
+        selected.append(segment)
+        total_length += length
+    return selected
 
 
 def _fetch_osm_line_layers(points_lonlat: np.ndarray, to_dem: Transformer, model_space: ModelSpace) -> dict[str, list[np.ndarray]]:
@@ -454,6 +538,8 @@ def run_python_pipeline(
         z_mm=z_mm,
         layer_height_mm=config.track_height_mm,
         layer_width_mm=min(track_width_mm, _TRACK_MAX_WIDTH_MM),
+        top_radius_mm=config.track_top_radius_mm,
+        base_offset_mm=-0.22,
     )
 
     clipped_water_segments = [
@@ -490,29 +576,64 @@ def run_python_pipeline(
         min_length_mm=_DETAIL_MIN_LENGTH_MM,
     )
 
+    model_span_mm = max(config.model_width_mm, config.model_height_mm, 1e-6)
+    clipped_water_segments = _select_top_segments(
+        clipped_water_segments,
+        model_width_mm=config.model_width_mm,
+        model_height_mm=config.model_height_mm,
+        max_segments=_WATER_MAX_SEGMENTS,
+        min_length_mm=_WATER_MIN_LENGTH_MM,
+        max_total_length_mm=model_span_mm * _WATER_MAX_TOTAL_RATIO,
+        min_span_ratio=_WATER_MIN_SPAN_RATIO,
+    )
+    clipped_green_segments = _select_top_segments(
+        clipped_green_segments,
+        model_width_mm=config.model_width_mm,
+        model_height_mm=config.model_height_mm,
+        max_segments=_GREEN_MAX_SEGMENTS,
+        min_length_mm=_GREEN_MIN_LENGTH_MM,
+        max_total_length_mm=model_span_mm * _GREEN_MAX_TOTAL_RATIO,
+        min_span_ratio=_GREEN_MIN_SPAN_RATIO,
+    )
+    clipped_detail_segments = _select_top_segments(
+        clipped_detail_segments,
+        model_width_mm=config.model_width_mm,
+        model_height_mm=config.model_height_mm,
+        max_segments=_DETAIL_MAX_SEGMENTS,
+        min_length_mm=_DETAIL_MIN_LENGTH_MM,
+        max_total_length_mm=model_span_mm * _DETAIL_MAX_TOTAL_RATIO,
+        min_span_ratio=_DETAIL_MIN_SPAN_RATIO,
+    )
+
     water_mesh = build_line_layer_mesh(
         line_segments_xy_mm=clipped_water_segments,
         x_mm=x_mm,
         y_mm=y_mm,
         z_mm=z_mm,
-        layer_height_mm=1.0,
-        layer_width_mm=2.6,
+        layer_height_mm=_WATER_LAYER_HEIGHT_MM,
+        layer_width_mm=_WATER_LAYER_WIDTH_MM,
+        top_radius_mm=min(0.9, _WATER_LAYER_WIDTH_MM * 0.4),
+        base_offset_mm=0.0,
     )
     green_mesh = build_line_layer_mesh(
         line_segments_xy_mm=clipped_green_segments,
         x_mm=x_mm,
         y_mm=y_mm,
         z_mm=z_mm,
-        layer_height_mm=0.7,
-        layer_width_mm=1.7,
+        layer_height_mm=_GREEN_LAYER_HEIGHT_MM,
+        layer_width_mm=_GREEN_LAYER_WIDTH_MM,
+        top_radius_mm=min(0.7, _GREEN_LAYER_WIDTH_MM * 0.38),
+        base_offset_mm=0.0,
     )
     detail_mesh = build_line_layer_mesh(
         line_segments_xy_mm=clipped_detail_segments,
         x_mm=x_mm,
         y_mm=y_mm,
         z_mm=z_mm,
-        layer_height_mm=0.35,
-        layer_width_mm=0.75,
+        layer_height_mm=_DETAIL_LAYER_HEIGHT_MM,
+        layer_width_mm=_DETAIL_LAYER_WIDTH_MM,
+        top_radius_mm=min(0.35, _DETAIL_LAYER_WIDTH_MM * 0.4),
+        base_offset_mm=0.0,
     )
 
     frame_mesh = (
