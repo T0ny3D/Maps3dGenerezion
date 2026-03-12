@@ -4,8 +4,8 @@ import numpy as np
 import trimesh
 
 
-_TRACK_BASE_OFFSET_MM = 0.08
-_TRACK_SMOOTH_WINDOW = 5
+_TRACK_BASE_OFFSET_MM = 0.12
+_TRACK_SMOOTH_WINDOW = 7
 
 
 def _grid_index(row: int, col: int, cols: int) -> int:

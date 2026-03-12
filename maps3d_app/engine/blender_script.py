@@ -340,7 +340,7 @@ def _create_track_inlay(job: dict, terrain_top: bpy.types.Object) -> tuple[bpy.t
     max_track_points = min(12000, max(1200, int(perimeter_mm * 2.0)))
 
     raw_track_points = job.get("track_points_mm", [])
-    points = _resample_track(raw_track_points, 1.0, max_points=max_track_points)
+    points = _resample_track(raw_track_points, 0.75, max_points=max_track_points)
     terrain_span_x = max(0.0, float(terrain_top.dimensions.x))
     terrain_span_y = max(0.0, float(terrain_top.dimensions.y))
     raw_min_x, raw_max_x, raw_min_y, raw_max_y = _points_bbox(points)
@@ -425,7 +425,7 @@ def _create_track_inlay(job: dict, terrain_top: bpy.types.Object) -> tuple[bpy.t
 
     bev = track_mesh.modifiers.new(name="TopRound", type="BEVEL")
     bev.width = max(0.05, min(top_radius, track_width * 0.45))
-    bev.segments = 2
+    bev.segments = 3
     bev.limit_method = "ANGLE"
 
     _debug_log(
@@ -539,9 +539,9 @@ def _build_ams_layers(job: dict, terrain_top: bpy.types.Object) -> tuple[bpy.typ
     green_lines, _, _ = _fit_lines_to_terrain(green_lines, terrain_span_x, terrain_span_y, "green")
     detail_lines, _, _ = _fit_lines_to_terrain(detail_lines, terrain_span_x, terrain_span_y, "detail")
 
-    water_curves = _curves_from_lines([[list(p) for p in line] for line in water_lines], "WaterCurve", 1.4)
-    green_curves = _curves_from_lines([[list(p) for p in line] for line in green_lines], "GreenCurve", 1.8)
-    detail_curves = _curves_from_lines([[list(p) for p in line] for line in detail_lines], "DetailCurve", 0.45)
+    water_curves = _curves_from_lines([[list(p) for p in line] for line in water_lines], "WaterCurve", 1.6)
+    green_curves = _curves_from_lines([[list(p) for p in line] for line in green_lines], "GreenCurve", 1.0)
+    detail_curves = _curves_from_lines([[list(p) for p in line] for line in detail_lines], "DetailCurve", 0.4)
 
     allow_fallback = bool(job.get("ams_allow_fallback", False))
     real_layers_present = bool(water_curves or green_curves or detail_curves)
@@ -549,13 +549,13 @@ def _build_ams_layers(job: dict, terrain_top: bpy.types.Object) -> tuple[bpy.typ
     if allow_fallback and not real_layers_present:
         _stage_log("ams", "fallback enabled: no real AMS lines available")
         water_curves = [_curve_from_points([(0.1 * sx, 0.5 * sy), (0.9 * sx, 0.5 * sy)], "WaterFallback")]
-        water_curves[0].data.bevel_depth = 1.4
+        water_curves[0].data.bevel_depth = 1.6
         green_curves = [_curve_from_points([(0.2 * sx, 0.2 * sy), (0.4 * sx, 0.35 * sy), (0.25 * sx, 0.6 * sy)], "GreenFallback")]
-        green_curves[0].data.bevel_depth = 1.8
+        green_curves[0].data.bevel_depth = 1.0
         for i in range(1, 6):
             y = (i / 6.0) * sy
             c = _curve_from_points([(0.08 * sx, y), (0.92 * sx, y + 2.0 * math.sin(i))], f"DetailFallback{i}")
-            c.data.bevel_depth = 0.45
+            c.data.bevel_depth = 0.4
             detail_curves.append(c)
     elif not allow_fallback:
         _stage_log(
@@ -570,9 +570,9 @@ def _build_ams_layers(job: dict, terrain_top: bpy.types.Object) -> tuple[bpy.typ
             f"(water={len(water_curves)} green={len(green_curves)} detail={len(detail_curves)})",
         )
 
-    water = _make_layer_from_curves(water_curves, terrain_top, thickness=0.8, name="WaterLayer")
-    green = _make_layer_from_curves(green_curves, terrain_top, thickness=0.8, name="GreenLayer")
-    detail = _make_layer_from_curves(detail_curves, terrain_top, thickness=0.6, name="DetailLayer")
+    water = _make_layer_from_curves(water_curves, terrain_top, thickness=1.0, name="WaterLayer")
+    green = _make_layer_from_curves(green_curves, terrain_top, thickness=0.7, name="GreenLayer")
+    detail = _make_layer_from_curves(detail_curves, terrain_top, thickness=0.45, name="DetailLayer")
     return water, green, detail
 
 
