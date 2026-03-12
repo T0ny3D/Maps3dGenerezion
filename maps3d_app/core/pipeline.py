@@ -8,6 +8,9 @@ from urllib.request import urlopen
 
 import numpy as np
 import rasterio
+from rasterio.enums import Resampling
+from rasterio.transform import from_bounds
+from rasterio.warp import reproject
 from pyproj import Geod, Transformer
 import trimesh
 from shapely.geometry import GeometryCollection, LineString, MultiLineString, box
@@ -17,6 +20,33 @@ from .mesh_builder import build_line_layer_mesh, build_rect_frame_mesh, build_te
 from .model_space import ModelSpace
 
 _WGS84_GEOD = Geod(ellps="WGS84")
+_RELIEF_DETAIL_BOOST = 0.45  # Unsharp-mask strength for terrain detail.
+_RELIEF_GAMMA = 0.88  # Gamma lift to improve relief readability.
+_RELIEF_SMOOTH_RADIUS = 1  # Box-filter radius used before detail boost.
+_RELIEF_MAX_CELLS = 2_000_000
+_TRACK_SIMPLIFY_TOL_MM = 0.25
+_TRACK_RESAMPLE_MM = 0.8
+_TRACK_MIN_LENGTH_MM = 2.0
+_TRACK_MIN_WIDTH_MM = 1.4
+_TRACK_MAX_WIDTH_MM = 3.0
+_TRACK_CLEARANCE_MULTIPLIER = 2.0
+_WATERWAY_TYPES = {"river", "canal", "stream"}
+_GREEN_LANDUSE = {"forest", "meadow", "grass", "wood"}
+_GREEN_LEISURE = {"park", "garden"}
+_HIGHWAY_TYPES = {"motorway", "trunk", "primary", "secondary"}
+_WATERWAY_QUERY = "|".join(sorted(_WATERWAY_TYPES))
+_GREEN_LANDUSE_QUERY = "|".join(sorted(_GREEN_LANDUSE))
+_GREEN_LEISURE_QUERY = "|".join(sorted(_GREEN_LEISURE))
+_HIGHWAY_QUERY = "|".join(sorted(_HIGHWAY_TYPES))
+_WATER_SIMPLIFY_TOL_MM = 0.4
+_WATER_RESAMPLE_MM = 1.2
+_WATER_MIN_LENGTH_MM = 5.0
+_GREEN_SIMPLIFY_TOL_MM = 0.45
+_GREEN_RESAMPLE_MM = 1.4
+_GREEN_MIN_LENGTH_MM = 6.0
+_DETAIL_SIMPLIFY_TOL_MM = 0.5
+_DETAIL_RESAMPLE_MM = 1.6
+_DETAIL_MIN_LENGTH_MM = 7.0
 
 
 def _model_horizontal_scale_mm_per_meter(ds: rasterio.io.DatasetReader, window: rasterio.windows.Window, model_width_mm: float, model_height_mm: float) -> float:
@@ -49,6 +79,24 @@ def _model_horizontal_scale_mm_per_meter(ds: rasterio.io.DatasetReader, window: 
         span_y_m = max(abs(float(span_y_m)), 1e-6)
 
     return min(model_width_mm / span_x_m, model_height_mm / span_y_m)
+
+
+def _extract_line_segments(geom: object) -> list[np.ndarray]:
+    if isinstance(geom, LineString):
+        coords = np.asarray(geom.coords, dtype=np.float64)
+        return [coords] if len(coords) >= 2 else []
+    segments: list[np.ndarray] = []
+    if isinstance(geom, MultiLineString):
+        for line in geom.geoms:
+            coords = np.asarray(line.coords, dtype=np.float64)
+            if len(coords) >= 2:
+                segments.append(coords)
+        return segments
+    if isinstance(geom, GeometryCollection):
+        for child in geom.geoms:
+            segments.extend(_extract_line_segments(child))
+        return segments
+    return []
 
 
 @dataclass
@@ -106,6 +154,109 @@ def _compute_bbox(points: np.ndarray, margin_ratio: float) -> tuple[float, float
     return minx - mx, miny - my, maxx + mx, maxy + my
 
 
+def _target_grid_shape(rows: int, cols: int, grid_res: int) -> tuple[int, int]:
+    if grid_res <= 0:
+        return rows, cols
+    max_dim = max(rows, cols)
+    if max_dim <= 0:
+        return rows, cols
+    scale = grid_res / max_dim
+    target_rows = max(2, int(round(rows * scale)))
+    target_cols = max(2, int(round(cols * scale)))
+    return target_rows, target_cols
+
+
+def _fill_dem_nans(dem: np.ndarray) -> np.ndarray:
+    finite = np.isfinite(dem)
+    if not np.any(finite):
+        raise ValueError("Ritaglio DEM privo di valori validi.")
+    min_elev = float(np.nanmin(dem))
+    return np.where(np.isfinite(dem), dem, min_elev)
+
+
+def _resample_dem_grid(
+    dem: np.ndarray,
+    src_transform: rasterio.Affine,
+    src_crs: rasterio.crs.CRS,
+    bounds: tuple[float, float, float, float],
+    target_rows: int,
+    target_cols: int,
+) -> tuple[np.ndarray, rasterio.Affine]:
+    dst = np.empty((target_rows, target_cols), dtype=np.float64)
+    dst_transform = from_bounds(*bounds, width=target_cols, height=target_rows)
+    reproject(
+        source=dem,
+        destination=dst,
+        src_transform=src_transform,
+        src_crs=src_crs,
+        dst_transform=dst_transform,
+        dst_crs=src_crs,
+        resampling=Resampling.cubic,
+        src_nodata=np.nan,
+        dst_nodata=np.nan,
+    )
+    return dst, dst_transform
+
+
+def _box_filter(values: np.ndarray, radius: int = 1) -> np.ndarray:
+    if radius <= 0:
+        return values
+    if values.size > _RELIEF_MAX_CELLS:
+        return values
+    kernel = radius * 2 + 1
+    padded = np.pad(values, radius, mode="edge")
+    windows = np.lib.stride_tricks.sliding_window_view(padded, (kernel, kernel))
+    return windows.mean(axis=(-1, -2))
+
+
+def _enhance_dem_relief(dem: np.ndarray) -> np.ndarray:
+    min_elev = float(np.nanmin(dem))
+    max_elev = float(np.nanmax(dem))
+    span = max_elev - min_elev
+    if span <= 1e-6:
+        return dem
+    norm = (dem - min_elev) / span
+    smooth = _box_filter(norm, radius=_RELIEF_SMOOTH_RADIUS)
+    detail = norm - smooth
+    boosted = np.clip(norm + detail * _RELIEF_DETAIL_BOOST, 0.0, 1.0)
+    adjusted = np.power(boosted, _RELIEF_GAMMA)
+    return adjusted * span + min_elev
+
+
+def _prepare_dem_grid(
+    ds: rasterio.io.DatasetReader,
+    points_dem: np.ndarray,
+    config: GenerateConfig,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, rasterio.windows.Window, float]:
+    minx, miny, maxx, maxy = _compute_bbox(points_dem, config.bbox_margin_ratio)
+    window = rasterio.windows.from_bounds(minx, miny, maxx, maxy, transform=ds.transform)
+    window = window.round_offsets().round_lengths()
+
+    data = ds.read(1, window=window, masked=True)
+    if data.size == 0:
+        raise ValueError("Ritaglio DEM vuoto: controlla GPX e DEM.")
+
+    dem = np.asarray(data.astype(np.float64).filled(np.nan), dtype=np.float64)
+    if not np.any(np.isfinite(dem)):
+        raise ValueError("Ritaglio DEM privo di valori validi.")
+
+    win_t = ds.window_transform(window)
+    bounds = rasterio.windows.bounds(window, ds.transform)
+    rows, cols = dem.shape
+    target_rows, target_cols = _target_grid_shape(rows, cols, config.grid_res)
+    if (target_rows, target_cols) != (rows, cols):
+        dem, win_t = _resample_dem_grid(dem, win_t, ds.crs, bounds, target_rows, target_cols)
+
+    dem = _fill_dem_nans(dem)
+    dem = _enhance_dem_relief(dem)
+    min_elev = float(np.nanmin(dem))
+
+    rows, cols = dem.shape
+    x_coords = win_t.c + (np.arange(cols) + 0.5) * win_t.a
+    y_coords = win_t.f + (np.arange(rows) + 0.5) * win_t.e
+    return dem, x_coords, y_coords, window, min_elev
+
+
 def _python_output_paths(stl_output_path: str | Path, test_mode: bool) -> dict[str, Path]:
     out = Path(stl_output_path)
     suffix = "_test" if test_mode else ""
@@ -128,26 +279,52 @@ def _clip_polyline_to_footprint(track_xy_mm: np.ndarray, model_width_mm: float, 
 
     footprint = box(0.0, 0.0, model_width_mm, model_height_mm)
     clipped = LineString(track_xy_mm).intersection(footprint)
+    return _extract_line_segments(clipped)
 
-    def _extract_segments(geom: object) -> list[np.ndarray]:
-        if isinstance(geom, LineString):
-            coords = np.asarray(geom.coords, dtype=np.float64)
-            return [coords] if len(coords) >= 2 else []
-        if isinstance(geom, MultiLineString):
-            segs: list[np.ndarray] = []
-            for line in geom.geoms:
-                coords = np.asarray(line.coords, dtype=np.float64)
-                if len(coords) >= 2:
-                    segs.append(coords)
-            return segs
-        if isinstance(geom, GeometryCollection):
-            segs: list[np.ndarray] = []
-            for child in geom.geoms:
-                segs.extend(_extract_segments(child))
-            return segs
-        return []
 
-    return _extract_segments(clipped)
+def _resample_polyline(points: np.ndarray, spacing_mm: float) -> np.ndarray:
+    if len(points) < 2 or spacing_mm <= 0:
+        return points
+    line = LineString(points)
+    length = line.length
+    if length <= spacing_mm:
+        return np.asarray(line.coords, dtype=np.float64)
+    distances = np.arange(0.0, length, spacing_mm)
+    if distances.size == 0 or distances[-1] < length:
+        distances = np.append(distances, length)
+    coords = [line.interpolate(dist).coords[0] for dist in distances]
+    return np.asarray(coords, dtype=np.float64)
+
+
+def _line_length(points: np.ndarray) -> float:
+    if len(points) < 2:
+        return 0.0
+    diffs = np.diff(points, axis=0)
+    return float(np.sum(np.linalg.norm(diffs, axis=1)))
+
+
+def _normalize_line_segments(
+    segments: list[np.ndarray],
+    simplify_tolerance_mm: float,
+    resample_spacing_mm: float,
+    min_length_mm: float,
+) -> list[np.ndarray]:
+    normalized: list[np.ndarray] = []
+    for segment in segments:
+        if len(segment) < 2:
+            continue
+        line = LineString(segment)
+        if simplify_tolerance_mm > 0:
+            line = line.simplify(simplify_tolerance_mm, preserve_topology=False)
+        if line.is_empty:
+            continue
+        for coords in _extract_line_segments(line):
+            if _line_length(coords) < min_length_mm:
+                continue
+            coords = _resample_polyline(coords, resample_spacing_mm)
+            if len(coords) >= 2 and _line_length(coords) >= min_length_mm:
+                normalized.append(coords)
+    return normalized
 
 
 def _fetch_osm_line_layers(points_lonlat: np.ndarray, to_dem: Transformer, model_space: ModelSpace) -> dict[str, list[np.ndarray]]:
@@ -164,10 +341,10 @@ def _fetch_osm_line_layers(points_lonlat: np.ndarray, to_dem: Transformer, model
 [out:json][timeout:25];
 (
   way["natural"="water"]({s},{w},{n},{e});
-  way["waterway"]({s},{w},{n},{e});
-  way["landuse"~"forest|meadow|grass"]({s},{w},{n},{e});
-  way["leisure"~"park|garden"]({s},{w},{n},{e});
-  way["highway"~"motorway|trunk|primary|secondary"]({s},{w},{n},{e});
+  way["waterway"~"{_WATERWAY_QUERY}"]({s},{w},{n},{e});
+  way["landuse"~"{_GREEN_LANDUSE_QUERY}"]({s},{w},{n},{e});
+  way["leisure"~"{_GREEN_LEISURE_QUERY}"]({s},{w},{n},{e});
+  way["highway"~"{_HIGHWAY_QUERY}"]({s},{w},{n},{e});
 );
 out geom;
 """
@@ -191,11 +368,13 @@ out geom;
         model_xy = model_space.to_model_xy(src_xy)
 
         tags = el.get("tags", {})
-        if tags.get("natural") == "water" or "waterway" in tags:
+        waterway = tags.get("waterway")
+        highway = tags.get("highway")
+        if tags.get("natural") == "water" or waterway in _WATERWAY_TYPES:
             layers["water"].append(model_xy)
-        elif tags.get("landuse") in {"forest", "meadow", "grass"} or tags.get("leisure") in {"park", "garden"}:
+        elif tags.get("landuse") in _GREEN_LANDUSE or tags.get("leisure") in _GREEN_LEISURE:
             layers["green"].append(model_xy)
-        elif tags.get("highway") in {"motorway", "trunk", "primary", "secondary"}:
+        elif highway in _HIGHWAY_TYPES:
             layers["detail"].append(model_xy)
 
     return layers
@@ -224,30 +403,7 @@ def run_python_pipeline(
         x_dem, y_dem = to_dem.transform(points_lonlat[:, 0], points_lonlat[:, 1])
         points_dem = np.column_stack((x_dem, y_dem))
 
-        minx, miny, maxx, maxy = _compute_bbox(points_dem, config.bbox_margin_ratio)
-
-        window = rasterio.windows.from_bounds(minx, miny, maxx, maxy, transform=ds.transform)
-        window = window.round_offsets().round_lengths()
-
-        data = ds.read(1, window=window, masked=True)
-        if data.size == 0:
-            raise ValueError("Ritaglio DEM vuoto: controlla GPX e DEM.")
-
-        dem = np.asarray(data.astype(np.float64).filled(np.nan), dtype=np.float64)
-        finite = np.isfinite(dem)
-        if not np.any(finite):
-            raise ValueError("Ritaglio DEM privo di valori validi.")
-
-        min_elev = float(np.nanmin(dem))
-        dem = np.where(np.isfinite(dem), dem, min_elev)
-
-        win_t = ds.window_transform(window)
-        rows, cols = dem.shape
-        cols_idx = np.arange(cols)
-        rows_idx = np.arange(rows)
-
-        x_coords = win_t.c + (cols_idx + 0.5) * win_t.a
-        y_coords = win_t.f + (rows_idx + 0.5) * win_t.e
+        dem, x_coords, y_coords, window, min_elev = _prepare_dem_grid(ds, points_dem, config)
 
         x_min, x_max = float(np.min(x_coords)), float(np.max(x_coords))
         y_min, y_max = float(np.min(y_coords)), float(np.max(y_coords))
@@ -280,13 +436,24 @@ def run_python_pipeline(
     terrain_mesh = build_terrain_mesh(x_mm=x_mm, y_mm=y_mm, z_mm=z_mm, base_thickness_mm=config.base_thickness_mm)
 
     clipped_track_segments = _clip_polyline_to_footprint(track_xy_mm, config.model_width_mm, config.model_height_mm)
+    clipped_track_segments = _normalize_line_segments(
+        clipped_track_segments,
+        simplify_tolerance_mm=_TRACK_SIMPLIFY_TOL_MM,
+        resample_spacing_mm=_TRACK_RESAMPLE_MM,
+        min_length_mm=_TRACK_MIN_LENGTH_MM,
+    )
+    raw_track_width_mm = max(
+        0.0,
+        config.groove_width_mm - _TRACK_CLEARANCE_MULTIPLIER * config.track_clearance_mm,
+    )
+    track_width_mm = max(_TRACK_MIN_WIDTH_MM, raw_track_width_mm)
     track_mesh = build_line_layer_mesh(
         line_segments_xy_mm=clipped_track_segments,
         x_mm=x_mm,
         y_mm=y_mm,
         z_mm=z_mm,
         layer_height_mm=config.track_height_mm,
-        layer_width_mm=1.2,
+        layer_width_mm=min(track_width_mm, _TRACK_MAX_WIDTH_MM),
     )
 
     clipped_water_segments = [
@@ -304,30 +471,48 @@ def run_python_pipeline(
         for src in osm_layers["detail"]
         for seg in _clip_polyline_to_footprint(src, config.model_width_mm, config.model_height_mm)
     ]
+    clipped_water_segments = _normalize_line_segments(
+        clipped_water_segments,
+        simplify_tolerance_mm=_WATER_SIMPLIFY_TOL_MM,
+        resample_spacing_mm=_WATER_RESAMPLE_MM,
+        min_length_mm=_WATER_MIN_LENGTH_MM,
+    )
+    clipped_green_segments = _normalize_line_segments(
+        clipped_green_segments,
+        simplify_tolerance_mm=_GREEN_SIMPLIFY_TOL_MM,
+        resample_spacing_mm=_GREEN_RESAMPLE_MM,
+        min_length_mm=_GREEN_MIN_LENGTH_MM,
+    )
+    clipped_detail_segments = _normalize_line_segments(
+        clipped_detail_segments,
+        simplify_tolerance_mm=_DETAIL_SIMPLIFY_TOL_MM,
+        resample_spacing_mm=_DETAIL_RESAMPLE_MM,
+        min_length_mm=_DETAIL_MIN_LENGTH_MM,
+    )
 
     water_mesh = build_line_layer_mesh(
         line_segments_xy_mm=clipped_water_segments,
         x_mm=x_mm,
         y_mm=y_mm,
         z_mm=z_mm,
-        layer_height_mm=0.7,
-        layer_width_mm=1.8,
+        layer_height_mm=0.8,
+        layer_width_mm=2.1,
     )
     green_mesh = build_line_layer_mesh(
         line_segments_xy_mm=clipped_green_segments,
         x_mm=x_mm,
         y_mm=y_mm,
         z_mm=z_mm,
-        layer_height_mm=0.5,
-        layer_width_mm=1.4,
+        layer_height_mm=0.6,
+        layer_width_mm=1.6,
     )
     detail_mesh = build_line_layer_mesh(
         line_segments_xy_mm=clipped_detail_segments,
         x_mm=x_mm,
         y_mm=y_mm,
         z_mm=z_mm,
-        layer_height_mm=0.4,
-        layer_width_mm=0.9,
+        layer_height_mm=0.45,
+        layer_width_mm=1.0,
     )
 
     frame_mesh = (
@@ -416,19 +601,7 @@ def estimate_relief_mm(gpx_path: str | Path, dem_path: str | Path, params: Gener
         x_dem, y_dem = to_dem.transform(points_lonlat[:, 0], points_lonlat[:, 1])
         points_dem = np.column_stack((x_dem, y_dem))
 
-        minx, miny, maxx, maxy = _compute_bbox(points_dem, params.bbox_margin_ratio)
-        window = rasterio.windows.from_bounds(minx, miny, maxx, maxy, transform=ds.transform)
-        window = window.round_offsets().round_lengths()
-
-        data = ds.read(1, window=window, masked=True)
-        if data.size == 0:
-            raise ValueError("Ritaglio DEM vuoto: controlla GPX e DEM.")
-
-        dem = np.asarray(data.astype(np.float64).filled(np.nan), dtype=np.float64)
-        finite = np.isfinite(dem)
-        if not np.any(finite):
-            raise ValueError("Ritaglio DEM privo di valori validi.")
-
+        dem, _, _, window, _ = _prepare_dem_grid(ds, points_dem, params)
         z_min = float(np.nanmin(dem))
         z_max = float(np.nanmax(dem))
 

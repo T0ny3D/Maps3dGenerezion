@@ -4,8 +4,26 @@ import numpy as np
 import trimesh
 
 
+_TRACK_BASE_OFFSET_MM = 0.08
+_TRACK_SMOOTH_WINDOW = 5
+
+
 def _grid_index(row: int, col: int, cols: int) -> int:
     return row * cols + col
+
+
+def _smooth_series(values: np.ndarray, window: int = 5) -> np.ndarray:
+    if window <= 1 or values.size < 3:
+        return values
+    window = min(window, values.size)
+    if window % 2 == 0:
+        window -= 1
+    if window < 3:
+        return values
+    pad = window // 2
+    padded = np.pad(values, pad, mode="edge")
+    kernel = np.ones(window, dtype=np.float64) / window
+    return np.convolve(padded, kernel, mode="valid")
 
 
 def build_terrain_mesh(
@@ -94,6 +112,11 @@ def build_track_mesh(
 ) -> trimesh.Trimesh:
     vertices: list[np.ndarray] = []
     faces: list[list[int]] = []
+    z_samples = np.array(
+        [sample_height_on_grid(x_mm, y_mm, z_mm, p[0], p[1]) for p in track_xy_mm],
+        dtype=np.float64,
+    )
+    z_samples = _smooth_series(z_samples, window=_TRACK_SMOOTH_WINDOW) + _TRACK_BASE_OFFSET_MM
 
     for i in range(len(track_xy_mm) - 1):
         p0 = track_xy_mm[i]
@@ -107,8 +130,8 @@ def build_track_mesh(
         normal = np.array([-direction[1], direction[0]])
         offset = normal * (track_width_mm / 2.0)
 
-        z0 = sample_height_on_grid(x_mm, y_mm, z_mm, p0[0], p0[1]) + 0.05
-        z1 = sample_height_on_grid(x_mm, y_mm, z_mm, p1[0], p1[1]) + 0.05
+        z0 = float(z_samples[i])
+        z1 = float(z_samples[i + 1])
 
         base0_l = np.array([p0[0] - offset[0], p0[1] - offset[1], z0])
         base0_r = np.array([p0[0] + offset[0], p0[1] + offset[1], z0])
