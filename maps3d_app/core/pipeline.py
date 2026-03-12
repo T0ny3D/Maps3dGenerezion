@@ -53,8 +53,8 @@ def _model_horizontal_scale_mm_per_meter(ds: rasterio.io.DatasetReader, window: 
 
 @dataclass
 class GenerateConfig:
-    model_width_mm: float = 150.0
-    model_height_mm: float = 150.0
+    model_width_mm: float = 120.0
+    model_height_mm: float = 120.0
     base_thickness_mm: float = 5.0
     vertical_scale: float = 1.0
     track_height_mm: float = 2.0
@@ -200,15 +200,6 @@ out geom;
 
     return layers
 
-
-
-
-
-
-
- main
- main
- main
 def _export_mesh_or_remove(path: Path, mesh: trimesh.Trimesh) -> None:
     if mesh.faces.shape[0] > 0:
         mesh.export(path)
@@ -321,33 +312,6 @@ def run_python_pipeline(
         z_mm=z_mm,
         layer_height_mm=0.7,
         layer_width_mm=1.8,
-
-
-
-        x_mm=x_mm,
-        y_mm=y_mm,
-        z_mm=z_mm,
-        layer_height_mm=0.7,
-        layer_width_mm=1.8,
-    )
-    green_mesh = build_line_layer_mesh(
-        line_segments_xy_mm=clipped_green_segments,
-        x_mm=x_mm,
-        y_mm=y_mm,
-        z_mm=z_mm,
-        layer_height_mm=0.5,
-        layer_width_mm=1.4,
-    )
-    detail_mesh = build_line_layer_mesh(
-        line_segments_xy_mm=clipped_detail_segments,
-        x_mm=x_mm,
-        y_mm=y_mm,
-        z_mm=z_mm,
-        layer_height_mm=0.4,
-        layer_width_mm=0.9,
- main
- main
- main
     )
     green_mesh = build_line_layer_mesh(
         line_segments_xy_mm=clipped_green_segments,
@@ -391,35 +355,6 @@ def run_python_pipeline(
     _export_mesh_or_remove(out_paths["green"], green_mesh)
     _export_mesh_or_remove(out_paths["detail"], detail_mesh)
     _export_mesh_or_remove(out_paths["frame"], frame_mesh)
-
-
-    frame_mesh = (
-        build_rect_frame_mesh(
-            model_width_mm=config.model_width_mm,
-            model_height_mm=config.model_height_mm,
-            frame_wall_mm=config.frame_wall_mm,
-            frame_height_mm=config.frame_height_mm,
-            clearance_mm=config.clearance_mm,
-            base_thickness_mm=config.base_thickness_mm,
-        )
-        if config.separate_frame
-        else trimesh.Trimesh(vertices=np.zeros((0, 3)), faces=np.zeros((0, 3), dtype=np.int64), process=False)
-    )
-
-    if terrain_mesh.faces.shape[0] == 0:
-        raise ValueError("Mesh base vuota, impossibile esportare STL.")
-
-    out_paths = _python_output_paths(stl_output_path, config.test_mode)
-    out_paths["base"].parent.mkdir(parents=True, exist_ok=True)
-
-    _export_mesh_or_remove(out_paths["base"], terrain_mesh)
-    _export_mesh_or_remove(out_paths["track"], track_mesh)
-    _export_mesh_or_remove(out_paths["water"], water_mesh)
-    _export_mesh_or_remove(out_paths["green"], green_mesh)
-    _export_mesh_or_remove(out_paths["detail"], detail_mesh)
-    _export_mesh_or_remove(out_paths["frame"], frame_mesh)
-
- main
     combined_meshes = [terrain_mesh]
     for mesh in (track_mesh, water_mesh, green_mesh, detail_mesh):
         if mesh.faces.shape[0] > 0:
