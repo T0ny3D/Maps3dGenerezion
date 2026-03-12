@@ -23,6 +23,7 @@ _WGS84_GEOD = Geod(ellps="WGS84")
 _RELIEF_DETAIL_BOOST = 0.45  # Unsharp-mask strength for terrain detail.
 _RELIEF_GAMMA = 0.88  # Gamma lift to improve relief readability.
 _RELIEF_SMOOTH_RADIUS = 1  # Box-filter radius used before detail boost.
+_RELIEF_MAX_CELLS = 2_000_000
 _TRACK_SIMPLIFY_TOL_MM = 0.25
 _TRACK_RESAMPLE_MM = 0.8
 _TRACK_MIN_LENGTH_MM = 2.0
@@ -199,6 +200,8 @@ def _resample_dem_grid(
 
 def _box_filter(values: np.ndarray, radius: int = 1) -> np.ndarray:
     if radius <= 0:
+        return values
+    if values.size > _RELIEF_MAX_CELLS:
         return values
     kernel = radius * 2 + 1
     padded = np.pad(values, radius, mode="edge")
