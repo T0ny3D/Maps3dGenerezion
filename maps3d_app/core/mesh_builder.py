@@ -4,6 +4,9 @@ import numpy as np
 import trimesh
 
 
+_TRACK_BASE_OFFSET_MM = 0.08
+
+
 def _grid_index(row: int, col: int, cols: int) -> int:
     return row * cols + col
 
@@ -108,12 +111,11 @@ def build_track_mesh(
 ) -> trimesh.Trimesh:
     vertices: list[np.ndarray] = []
     faces: list[list[int]] = []
-    base_offset_mm = 0.08
     z_samples = np.array(
         [sample_height_on_grid(x_mm, y_mm, z_mm, p[0], p[1]) for p in track_xy_mm],
         dtype=np.float64,
     )
-    z_samples = _smooth_series(z_samples, window=5) + base_offset_mm
+    z_samples = _smooth_series(z_samples, window=5) + _TRACK_BASE_OFFSET_MM
 
     for i in range(len(track_xy_mm) - 1):
         p0 = track_xy_mm[i]

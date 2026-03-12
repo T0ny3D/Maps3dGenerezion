@@ -20,6 +20,20 @@ from .mesh_builder import build_line_layer_mesh, build_rect_frame_mesh, build_te
 from .model_space import ModelSpace
 
 _WGS84_GEOD = Geod(ellps="WGS84")
+_RELIEF_DETAIL_BOOST = 0.45
+_RELIEF_GAMMA = 0.88
+_TRACK_SIMPLIFY_TOL_MM = 0.25
+_TRACK_RESAMPLE_MM = 0.8
+_TRACK_MIN_LENGTH_MM = 2.0
+_WATER_SIMPLIFY_TOL_MM = 0.4
+_WATER_RESAMPLE_MM = 1.2
+_WATER_MIN_LENGTH_MM = 5.0
+_GREEN_SIMPLIFY_TOL_MM = 0.45
+_GREEN_RESAMPLE_MM = 1.4
+_GREEN_MIN_LENGTH_MM = 6.0
+_DETAIL_SIMPLIFY_TOL_MM = 0.5
+_DETAIL_RESAMPLE_MM = 1.6
+_DETAIL_MIN_LENGTH_MM = 7.0
 
 
 def _model_horizontal_scale_mm_per_meter(ds: rasterio.io.DatasetReader, window: rasterio.windows.Window, model_width_mm: float, model_height_mm: float) -> float:
@@ -190,8 +204,8 @@ def _enhance_dem_relief(dem: np.ndarray) -> np.ndarray:
     norm = (dem - min_elev) / span
     smooth = _box_filter(norm, radius=1)
     detail = norm - smooth
-    boosted = np.clip(norm + detail * 0.45, 0.0, 1.0)
-    adjusted = np.power(boosted, 0.88)
+    boosted = np.clip(norm + detail * _RELIEF_DETAIL_BOOST, 0.0, 1.0)
+    adjusted = np.power(boosted, _RELIEF_GAMMA)
     return adjusted * span + min_elev
 
 
@@ -410,9 +424,9 @@ def run_python_pipeline(
     clipped_track_segments = _clip_polyline_to_footprint(track_xy_mm, config.model_width_mm, config.model_height_mm)
     clipped_track_segments = _normalize_line_segments(
         clipped_track_segments,
-        simplify_tolerance_mm=0.25,
-        resample_spacing_mm=0.8,
-        min_length_mm=2.0,
+        simplify_tolerance_mm=_TRACK_SIMPLIFY_TOL_MM,
+        resample_spacing_mm=_TRACK_RESAMPLE_MM,
+        min_length_mm=_TRACK_MIN_LENGTH_MM,
     )
     track_width_mm = max(1.4, config.groove_width_mm - 2.0 * config.track_clearance_mm)
     track_mesh = build_line_layer_mesh(
@@ -441,21 +455,21 @@ def run_python_pipeline(
     ]
     clipped_water_segments = _normalize_line_segments(
         clipped_water_segments,
-        simplify_tolerance_mm=0.4,
-        resample_spacing_mm=1.2,
-        min_length_mm=5.0,
+        simplify_tolerance_mm=_WATER_SIMPLIFY_TOL_MM,
+        resample_spacing_mm=_WATER_RESAMPLE_MM,
+        min_length_mm=_WATER_MIN_LENGTH_MM,
     )
     clipped_green_segments = _normalize_line_segments(
         clipped_green_segments,
-        simplify_tolerance_mm=0.45,
-        resample_spacing_mm=1.4,
-        min_length_mm=6.0,
+        simplify_tolerance_mm=_GREEN_SIMPLIFY_TOL_MM,
+        resample_spacing_mm=_GREEN_RESAMPLE_MM,
+        min_length_mm=_GREEN_MIN_LENGTH_MM,
     )
     clipped_detail_segments = _normalize_line_segments(
         clipped_detail_segments,
-        simplify_tolerance_mm=0.5,
-        resample_spacing_mm=1.6,
-        min_length_mm=7.0,
+        simplify_tolerance_mm=_DETAIL_SIMPLIFY_TOL_MM,
+        resample_spacing_mm=_DETAIL_RESAMPLE_MM,
+        min_length_mm=_DETAIL_MIN_LENGTH_MM,
     )
 
     water_mesh = build_line_layer_mesh(
