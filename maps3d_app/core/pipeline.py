@@ -65,6 +65,14 @@ _GREEN_LAYER_HEIGHT_MM = 1.1
 _GREEN_LAYER_WIDTH_MM = 2.4
 _DETAIL_LAYER_HEIGHT_MM = 0.25
 _DETAIL_LAYER_WIDTH_MM = 0.55
+_TRACK_INLAY_BASE_OFFSET_MM = -0.22
+_OSM_SCORE_BASE = 0.65
+_WATER_TOP_RADIUS_MAX_MM = 0.9
+_WATER_TOP_RADIUS_RATIO = 0.4
+_GREEN_TOP_RADIUS_MAX_MM = 0.7
+_GREEN_TOP_RADIUS_RATIO = 0.38
+_DETAIL_TOP_RADIUS_MAX_MM = 0.35
+_DETAIL_TOP_RADIUS_RATIO = 0.4
 
 
 def _model_horizontal_scale_mm_per_meter(ds: rasterio.io.DatasetReader, window: rasterio.windows.Window, model_width_mm: float, model_height_mm: float) -> float:
@@ -391,7 +399,7 @@ def _select_top_segments(
         span_ratio = _segment_span_ratio(segment, model_span)
         if span_ratio < min_span_ratio:
             continue
-        score = length * (0.65 + span_ratio)
+        score = length * (_OSM_SCORE_BASE + span_ratio)
         scored.append((score, length, segment))
 
     if not scored:
@@ -539,7 +547,7 @@ def run_python_pipeline(
         layer_height_mm=config.track_height_mm,
         layer_width_mm=min(track_width_mm, _TRACK_MAX_WIDTH_MM),
         top_radius_mm=config.track_top_radius_mm,
-        base_offset_mm=-0.22,
+        base_offset_mm=_TRACK_INLAY_BASE_OFFSET_MM,
     )
 
     clipped_water_segments = [
@@ -612,7 +620,7 @@ def run_python_pipeline(
         z_mm=z_mm,
         layer_height_mm=_WATER_LAYER_HEIGHT_MM,
         layer_width_mm=_WATER_LAYER_WIDTH_MM,
-        top_radius_mm=min(0.9, _WATER_LAYER_WIDTH_MM * 0.4),
+        top_radius_mm=min(_WATER_TOP_RADIUS_MAX_MM, _WATER_LAYER_WIDTH_MM * _WATER_TOP_RADIUS_RATIO),
         base_offset_mm=0.0,
     )
     green_mesh = build_line_layer_mesh(
@@ -622,7 +630,7 @@ def run_python_pipeline(
         z_mm=z_mm,
         layer_height_mm=_GREEN_LAYER_HEIGHT_MM,
         layer_width_mm=_GREEN_LAYER_WIDTH_MM,
-        top_radius_mm=min(0.7, _GREEN_LAYER_WIDTH_MM * 0.38),
+        top_radius_mm=min(_GREEN_TOP_RADIUS_MAX_MM, _GREEN_LAYER_WIDTH_MM * _GREEN_TOP_RADIUS_RATIO),
         base_offset_mm=0.0,
     )
     detail_mesh = build_line_layer_mesh(
@@ -632,7 +640,7 @@ def run_python_pipeline(
         z_mm=z_mm,
         layer_height_mm=_DETAIL_LAYER_HEIGHT_MM,
         layer_width_mm=_DETAIL_LAYER_WIDTH_MM,
-        top_radius_mm=min(0.35, _DETAIL_LAYER_WIDTH_MM * 0.4),
+        top_radius_mm=min(_DETAIL_TOP_RADIUS_MAX_MM, _DETAIL_LAYER_WIDTH_MM * _DETAIL_TOP_RADIUS_RATIO),
         base_offset_mm=0.0,
     )
 

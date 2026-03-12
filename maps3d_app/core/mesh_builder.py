@@ -6,6 +6,10 @@ import trimesh
 
 _TRACK_BASE_OFFSET_MM = -0.18
 _TRACK_SMOOTH_WINDOW = 11
+_TRACK_PROFILE_SHOULDER_RATIO = 0.82
+_TRACK_PROFILE_SHOULDER_HEIGHT_RATIO = 0.55
+_TRACK_PROFILE_TOP_MIN_RATIO = 0.35
+_TRACK_PROFILE_TOP_MAX_RATIO = 0.55
 
 
 def _grid_index(row: int, col: int, cols: int) -> int:
@@ -111,10 +115,10 @@ def _track_profile_offsets(
     width = max(track_width_mm, 0.1)
     height = max(track_height_mm, 0.1)
     half_base = width * 0.5
-    shoulder_half = half_base * 0.82
-    shoulder_height = height * 0.55
+    shoulder_half = half_base * _TRACK_PROFILE_SHOULDER_RATIO
+    shoulder_height = height * _TRACK_PROFILE_SHOULDER_HEIGHT_RATIO
     radius = max(0.0, min(top_radius_mm, height, half_base))
-    half_top = min(half_base * 0.55, max(radius, half_base * 0.35))
+    half_top = min(half_base * _TRACK_PROFILE_TOP_MAX_RATIO, max(radius, half_base * _TRACK_PROFILE_TOP_MIN_RATIO))
     if radius <= 1e-3:
         arc = [(-half_top, height), (half_top, height)]
     else:
