@@ -67,7 +67,7 @@ _GREEN_LAYER_HEIGHT_MM = 1.1
 _GREEN_LAYER_WIDTH_MM = 2.4
 _DETAIL_LAYER_HEIGHT_MM = 0.25
 _DETAIL_LAYER_WIDTH_MM = 0.55
-_OSM_SCORE_BASE = 0.65  # Dimensionless weighting (0-1) for baseline feature importance.
+_OSM_SCORE_BASE = 0.65  # Dimensionless base weight for feature importance ranking.
 _WATER_TOP_RADIUS_MAX_MM = 0.9
 _WATER_TOP_RADIUS_RATIO = 0.4
 _GREEN_TOP_RADIUS_MAX_MM = 0.7
@@ -408,7 +408,8 @@ def _select_top_segments(
         scored.append((score, length, segment))
 
     if not scored:
-        longest_length, longest = max(((_line_length(segment), segment) for segment in segments), key=lambda item: item[0])
+        longest = max(segments, key=_line_length)
+        longest_length = _line_length(longest)
         return [longest] if longest_length > 0 else []
 
     scored.sort(key=lambda item: item[0], reverse=True)

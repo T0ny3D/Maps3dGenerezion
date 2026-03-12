@@ -4,7 +4,7 @@ import numpy as np
 import trimesh
 
 
-_TRACK_BASE_OFFSET_MM = -0.22  # Negative offset seats the inlay below terrain surface for flush integration.
+_TRACK_BASE_OFFSET_MM = -0.22  # Negative offset seats the track inlay below terrain surface; other layers override.
 _TRACK_SMOOTH_WINDOW = 11
 _TRACK_PROFILE_SHOULDER_RATIO = 0.82
 _TRACK_PROFILE_SHOULDER_HEIGHT_RATIO = 0.55
@@ -117,10 +117,12 @@ def _track_profile_offsets(
     height = max(track_height_mm, 0.1)
     arc_points = max(arc_points, _TRACK_PROFILE_MIN_ARC_POINTS)
     half_base = width * 0.5
+    min_half_top = half_base * _TRACK_PROFILE_TOP_MIN_RATIO
+    max_half_top = half_base * _TRACK_PROFILE_TOP_MAX_RATIO
     shoulder_half = half_base * _TRACK_PROFILE_SHOULDER_RATIO
     shoulder_height = height * _TRACK_PROFILE_SHOULDER_HEIGHT_RATIO
     radius = max(0.0, min(top_radius_mm, height, half_base))
-    half_top = min(half_base * _TRACK_PROFILE_TOP_MAX_RATIO, max(radius, half_base * _TRACK_PROFILE_TOP_MIN_RATIO))
+    half_top = min(max_half_top, max(radius, min_half_top))
     if radius <= 1e-3:
         arc = [(-half_top, height), (half_top, height)]
     else:
@@ -148,7 +150,7 @@ def _profile_centroid(profile: list[tuple[float, float]]) -> np.ndarray:
     coords = np.asarray(profile, dtype=np.float64)
     if coords.shape[0] < 3:
         return np.array([0.0, float(np.mean(coords[:, 1])) if coords.size else 0.0], dtype=np.float64)
-    # Compute centroid using the shoelace formula for a closed polygon profile.
+    # Compute centroid using the shoelace formula after closing the profile loop.
     x = coords[:, 0]
     y = coords[:, 1]
     x2 = np.append(x, x[0])
@@ -210,8 +212,7 @@ def build_track_mesh(
     for i in range(len(track_xy_mm) - 1):
         start = i * profile_count
         nxt = (i + 1) * profile_count
-        # Close the open profile loop (last -> first) so the sweep produces a solid track without
-        # duplicating the first vertex in the profile definition.
+        # Treat the open profile as implicitly closed by wrapping indices for a solid sweep.
         for j in range(profile_count):
             j_next = (j + 1) % profile_count
             v0 = start + j
