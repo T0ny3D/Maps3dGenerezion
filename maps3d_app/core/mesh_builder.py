@@ -4,8 +4,13 @@ import numpy as np
 import trimesh
 
 
-_TRACK_BASE_OFFSET_MM = 0.12
-_TRACK_SMOOTH_WINDOW = 7
+_TRACK_BASE_OFFSET_MM = -0.22  # Negative offset seats the track inlay below terrain surface; other layers override.
+_TRACK_SMOOTH_WINDOW = 11
+_TRACK_PROFILE_SHOULDER_RATIO = 0.82
+_TRACK_PROFILE_SHOULDER_HEIGHT_RATIO = 0.55
+_TRACK_PROFILE_TOP_MIN_RATIO = 0.35
+_TRACK_PROFILE_TOP_MAX_RATIO = 0.55
+_TRACK_PROFILE_MIN_ARC_POINTS = 3
 
 
 def _grid_index(row: int, col: int, cols: int) -> int:
@@ -102,6 +107,63 @@ def sample_height_on_grid(x_mm: np.ndarray, y_mm: np.ndarray, z_mm: np.ndarray, 
     return float(z0 * (1 - ty) + z1 * ty)
 
 
+def _track_profile_offsets(
+    track_width_mm: float,
+    track_height_mm: float,
+    top_radius_mm: float,
+    arc_points: int = 5,
+) -> list[tuple[float, float]]:
+    width = max(track_width_mm, 0.1)
+    height = max(track_height_mm, 0.1)
+    arc_points = max(arc_points, _TRACK_PROFILE_MIN_ARC_POINTS)
+    half_base = width * 0.5
+    min_half_top = half_base * _TRACK_PROFILE_TOP_MIN_RATIO
+    max_half_top = half_base * _TRACK_PROFILE_TOP_MAX_RATIO
+    shoulder_half = half_base * _TRACK_PROFILE_SHOULDER_RATIO
+    shoulder_height = height * _TRACK_PROFILE_SHOULDER_HEIGHT_RATIO
+    radius = max(0.0, min(top_radius_mm, height, half_base))
+    half_top = min(max_half_top, max(radius, min_half_top))
+    if radius <= 1e-3:
+        arc = [(-half_top, height), (half_top, height)]
+    else:
+        clamped_half_top = min(half_top, radius)
+        arc_x = np.linspace(-clamped_half_top, clamped_half_top, num=arc_points)
+        # Circular crown arc centered at (0, height - radius) for a rounded top.
+        arc_z = height - radius + np.sqrt(np.clip(radius * radius - arc_x * arc_x, 0.0, None))
+        arc = list(zip(arc_x, arc_z))
+    profile: list[tuple[float, float]] = [(-half_base, 0.0), (-shoulder_half, shoulder_height)]
+    profile.extend(arc)
+    profile.append((shoulder_half, shoulder_height))
+    profile.append((half_base, 0.0))
+    return profile
+
+
+def _safe_normal(vec: np.ndarray) -> np.ndarray:
+    norm = np.linalg.norm(vec)
+    if norm < 1e-6:
+        # Deterministic fallback for degenerate segments.
+        return np.array([1.0, 0.0], dtype=np.float64)
+    return vec / norm
+
+
+def _profile_centroid(profile: list[tuple[float, float]]) -> np.ndarray:
+    coords = np.asarray(profile, dtype=np.float64)
+    if coords.shape[0] < 3:
+        return np.array([0.0, float(np.mean(coords[:, 1])) if coords.size else 0.0], dtype=np.float64)
+    # Compute centroid using the shoelace formula after closing the profile loop.
+    x = coords[:, 0]
+    y = coords[:, 1]
+    x2 = np.append(x, x[0])
+    y2 = np.append(y, y[0])
+    cross = x2[:-1] * y2[1:] - x2[1:] * y2[:-1]
+    area = np.sum(cross) * 0.5
+    if abs(area) < 1e-9:
+        return np.array([float(np.mean(x)), float(np.mean(y))], dtype=np.float64)
+    cx = np.sum((x2[:-1] + x2[1:]) * cross) / (6.0 * area)
+    cy = np.sum((y2[:-1] + y2[1:]) * cross) / (6.0 * area)
+    return np.array([cx, cy], dtype=np.float64)
+
+
 def build_track_mesh(
     track_xy_mm: np.ndarray,
     x_mm: np.ndarray,
@@ -109,59 +171,85 @@ def build_track_mesh(
     z_mm: np.ndarray,
     track_height_mm: float,
     track_width_mm: float = 1.2,
+    top_radius_mm: float = 0.0,
+    base_offset_mm: float = _TRACK_BASE_OFFSET_MM,
 ) -> trimesh.Trimesh:
-    vertices: list[np.ndarray] = []
-    faces: list[list[int]] = []
+    if len(track_xy_mm) < 2:
+        return trimesh.Trimesh(vertices=np.zeros((0, 3)), faces=np.zeros((0, 3), dtype=np.int64), process=False)
+
     z_samples = np.array(
         [sample_height_on_grid(x_mm, y_mm, z_mm, p[0], p[1]) for p in track_xy_mm],
         dtype=np.float64,
     )
-    z_samples = _smooth_series(z_samples, window=_TRACK_SMOOTH_WINDOW) + _TRACK_BASE_OFFSET_MM
+    z_samples = _smooth_series(z_samples, window=_TRACK_SMOOTH_WINDOW) + base_offset_mm
 
+    directions = np.diff(track_xy_mm, axis=0)
+    directions = np.array([_safe_normal(vec) for vec in directions], dtype=np.float64)
+    tangents: list[np.ndarray] = []
+    for i in range(len(track_xy_mm)):
+        if i == 0:
+            tangent = directions[0]
+        elif i == len(track_xy_mm) - 1:
+            tangent = directions[-1]
+        else:
+            tangent = _safe_normal(directions[i - 1] + directions[i])
+        tangents.append(tangent)
+    tangents_np = np.asarray(tangents, dtype=np.float64)
+    normals = np.column_stack((-tangents_np[:, 1], tangents_np[:, 0]))
+
+    profile = _track_profile_offsets(track_width_mm, track_height_mm, top_radius_mm)
+    profile_center = _profile_centroid(profile)
+    profile_count = len(profile)
+    vertices = np.zeros((len(track_xy_mm) * profile_count, 3), dtype=np.float64)
+    for i, center in enumerate(track_xy_mm):
+        normal = normals[i]
+        base_z = z_samples[i]
+        for j, (offset, height) in enumerate(profile):
+            idx = i * profile_count + j
+            vertices[idx] = np.array([center[0] + normal[0] * offset, center[1] + normal[1] * offset, base_z + height])
+
+    faces: list[list[int]] = []
     for i in range(len(track_xy_mm) - 1):
-        p0 = track_xy_mm[i]
-        p1 = track_xy_mm[i + 1]
-        v = p1 - p0
-        length = np.linalg.norm(v)
-        if length < 1e-6:
-            continue
+        start = i * profile_count
+        nxt = (i + 1) * profile_count
+        # Treat the open profile as implicitly closed by wrapping indices for a solid sweep.
+        for j in range(profile_count):
+            j_next = (j + 1) % profile_count
+            v0 = start + j
+            v1 = start + j_next
+            v2 = nxt + j
+            v3 = nxt + j_next
+            faces.append([v0, v2, v1])
+            faces.append([v1, v2, v3])
 
-        direction = v / length
-        normal = np.array([-direction[1], direction[0]])
-        offset = normal * (track_width_mm / 2.0)
+    start_center = track_xy_mm[0]
+    end_center = track_xy_mm[-1]
+    cap_start = np.array(
+        [
+            start_center[0] + normals[0][0] * profile_center[0],
+            start_center[1] + normals[0][1] * profile_center[0],
+            z_samples[0] + profile_center[1],
+        ],
+        dtype=np.float64,
+    )
+    cap_end = np.array(
+        [
+            end_center[0] + normals[-1][0] * profile_center[0],
+            end_center[1] + normals[-1][1] * profile_center[0],
+            z_samples[-1] + profile_center[1],
+        ],
+        dtype=np.float64,
+    )
+    cap_start_idx = len(vertices)
+    cap_end_idx = cap_start_idx + 1
+    vertices = np.vstack((vertices, cap_start, cap_end))
+    for j in range(profile_count):
+        j_next = (j + 1) % profile_count
+        faces.append([cap_start_idx, j_next, j])
+        end_base = (len(track_xy_mm) - 1) * profile_count
+        faces.append([cap_end_idx, end_base + j, end_base + j_next])
 
-        z0 = float(z_samples[i])
-        z1 = float(z_samples[i + 1])
-
-        base0_l = np.array([p0[0] - offset[0], p0[1] - offset[1], z0])
-        base0_r = np.array([p0[0] + offset[0], p0[1] + offset[1], z0])
-        base1_l = np.array([p1[0] - offset[0], p1[1] - offset[1], z1])
-        base1_r = np.array([p1[0] + offset[0], p1[1] + offset[1], z1])
-
-        top0_l = base0_l + np.array([0.0, 0.0, track_height_mm])
-        top0_r = base0_r + np.array([0.0, 0.0, track_height_mm])
-        top1_l = base1_l + np.array([0.0, 0.0, track_height_mm])
-        top1_r = base1_r + np.array([0.0, 0.0, track_height_mm])
-
-        prism = [base0_l, base0_r, base1_l, base1_r, top0_l, top0_r, top1_l, top1_r]
-        start = len(vertices)
-        vertices.extend(prism)
-
-        local_faces = [
-            [0, 2, 1], [1, 2, 3],
-            [4, 5, 6], [5, 7, 6],
-            [0, 1, 4], [1, 5, 4],
-            [2, 6, 3], [3, 6, 7],
-            [1, 3, 5], [3, 7, 5],
-            [0, 4, 2], [2, 4, 6],
-        ]
-        for face in local_faces:
-            faces.append([start + idx for idx in face])
-
-    if not vertices:
-        return trimesh.Trimesh(vertices=np.zeros((0, 3)), faces=np.zeros((0, 3), dtype=np.int64), process=False)
-
-    return trimesh.Trimesh(vertices=np.asarray(vertices), faces=np.asarray(faces, dtype=np.int64), process=False)
+    return trimesh.Trimesh(vertices=vertices, faces=np.asarray(faces, dtype=np.int64), process=False)
 
 
 def build_line_layer_mesh(
@@ -171,6 +259,8 @@ def build_line_layer_mesh(
     z_mm: np.ndarray,
     layer_height_mm: float,
     layer_width_mm: float,
+    top_radius_mm: float = 0.0,
+    base_offset_mm: float = _TRACK_BASE_OFFSET_MM,
 ) -> trimesh.Trimesh:
     meshes: list[trimesh.Trimesh] = []
     for segment in line_segments_xy_mm:
@@ -183,6 +273,8 @@ def build_line_layer_mesh(
             z_mm=z_mm,
             track_height_mm=layer_height_mm,
             track_width_mm=layer_width_mm,
+            top_radius_mm=top_radius_mm,
+            base_offset_mm=base_offset_mm,
         )
         if mesh.faces.shape[0] > 0:
             meshes.append(mesh)
