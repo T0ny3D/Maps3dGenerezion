@@ -201,7 +201,6 @@ out geom;
     return layers
 
 
- codex/transition-to-python-based-stl-generation-pipeline-hgo53g
 
 
 
@@ -313,7 +312,6 @@ def run_python_pipeline(
 
     water_mesh = build_line_layer_mesh(
         line_segments_xy_mm=clipped_water_segments,
- codex/transition-to-python-based-stl-generation-pipeline-hgo53g
         x_mm=x_mm,
         y_mm=y_mm,
         z_mm=z_mm,
@@ -379,7 +377,6 @@ def run_python_pipeline(
     out_paths = _python_output_paths(stl_output_path, config.test_mode)
     out_paths["base"].parent.mkdir(parents=True, exist_ok=True)
 
- codex/transition-to-python-based-stl-generation-pipeline-hgo53g
     _export_mesh_or_remove(out_paths["base"], terrain_mesh)
     _export_mesh_or_remove(out_paths["track"], track_mesh)
     _export_mesh_or_remove(out_paths["water"], water_mesh)
