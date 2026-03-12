@@ -20,11 +20,11 @@ from .mesh_builder import build_line_layer_mesh, build_rect_frame_mesh, build_te
 from .model_space import ModelSpace
 
 _WGS84_GEOD = Geod(ellps="WGS84")
-_RELIEF_DETAIL_BOOST = 0.55  # Unsharp-mask strength for terrain detail.
-_RELIEF_GAMMA = 0.85  # Gamma lift to improve relief readability.
+_RELIEF_DETAIL_BOOST = 0.6  # Unsharp-mask strength for terrain detail.
+_RELIEF_GAMMA = 0.84  # Gamma lift to improve relief readability.
 _RELIEF_SMOOTH_RADIUS = 2  # Box-filter radius used before detail boost.
 _RELIEF_MAX_CELLS = 2_000_000
-_TRACK_SIMPLIFY_TOL_MM = 0.35
+_TRACK_SIMPLIFY_TOL_MM = 0.4
 _TRACK_RESAMPLE_MM = 0.7
 _TRACK_MIN_LENGTH_MM = 2.0
 _TRACK_MIN_WIDTH_MM = 1.4
@@ -33,20 +33,20 @@ _TRACK_CLEARANCE_MULTIPLIER = 2.0
 _WATERWAY_TYPES = {"river", "canal", "stream"}
 _GREEN_LANDUSE = {"forest", "meadow", "grass", "wood"}
 _GREEN_LEISURE = {"park", "garden"}
-_HIGHWAY_TYPES = {"motorway", "trunk", "primary", "secondary"}
+_HIGHWAY_TYPES = {"motorway", "trunk", "primary"}
 _WATERWAY_QUERY = "|".join(sorted(_WATERWAY_TYPES))
 _GREEN_LANDUSE_QUERY = "|".join(sorted(_GREEN_LANDUSE))
 _GREEN_LEISURE_QUERY = "|".join(sorted(_GREEN_LEISURE))
 _HIGHWAY_QUERY = "|".join(sorted(_HIGHWAY_TYPES))
-_WATER_SIMPLIFY_TOL_MM = 0.6
-_WATER_RESAMPLE_MM = 1.6
-_WATER_MIN_LENGTH_MM = 7.0
-_GREEN_SIMPLIFY_TOL_MM = 0.6
-_GREEN_RESAMPLE_MM = 1.8
-_GREEN_MIN_LENGTH_MM = 8.0
-_DETAIL_SIMPLIFY_TOL_MM = 0.75
-_DETAIL_RESAMPLE_MM = 2.0
-_DETAIL_MIN_LENGTH_MM = 8.0
+_WATER_SIMPLIFY_TOL_MM = 0.7
+_WATER_RESAMPLE_MM = 1.8
+_WATER_MIN_LENGTH_MM = 8.0
+_GREEN_SIMPLIFY_TOL_MM = 0.75
+_GREEN_RESAMPLE_MM = 2.0
+_GREEN_MIN_LENGTH_MM = 9.0
+_DETAIL_SIMPLIFY_TOL_MM = 0.9
+_DETAIL_RESAMPLE_MM = 2.4
+_DETAIL_MIN_LENGTH_MM = 10.0
 
 
 def _model_horizontal_scale_mm_per_meter(ds: rasterio.io.DatasetReader, window: rasterio.windows.Window, model_width_mm: float, model_height_mm: float) -> float:
@@ -495,8 +495,8 @@ def run_python_pipeline(
         x_mm=x_mm,
         y_mm=y_mm,
         z_mm=z_mm,
-        layer_height_mm=0.9,
-        layer_width_mm=2.4,
+        layer_height_mm=1.0,
+        layer_width_mm=2.6,
     )
     green_mesh = build_line_layer_mesh(
         line_segments_xy_mm=clipped_green_segments,
@@ -504,15 +504,15 @@ def run_python_pipeline(
         y_mm=y_mm,
         z_mm=z_mm,
         layer_height_mm=0.7,
-        layer_width_mm=1.8,
+        layer_width_mm=1.7,
     )
     detail_mesh = build_line_layer_mesh(
         line_segments_xy_mm=clipped_detail_segments,
         x_mm=x_mm,
         y_mm=y_mm,
         z_mm=z_mm,
-        layer_height_mm=0.45,
-        layer_width_mm=0.9,
+        layer_height_mm=0.35,
+        layer_width_mm=0.75,
     )
 
     frame_mesh = (
