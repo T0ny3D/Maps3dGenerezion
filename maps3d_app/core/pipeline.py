@@ -46,7 +46,7 @@ _GREEN_RESAMPLE_MM = 1.8
 _GREEN_MIN_LENGTH_MM = 8.0
 _DETAIL_SIMPLIFY_TOL_MM = 0.75
 _DETAIL_RESAMPLE_MM = 2.0
-_DETAIL_MIN_LENGTH_MM = 10.0
+_DETAIL_MIN_LENGTH_MM = 8.0
 
 
 def _model_horizontal_scale_mm_per_meter(ds: rasterio.io.DatasetReader, window: rasterio.windows.Window, model_width_mm: float, model_height_mm: float) -> float:
