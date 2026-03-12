@@ -18,7 +18,31 @@ import rasterio
 from pyproj import Transformer
 
 from .gpx_loader import load_gpx_points
-from .pipeline import GenerateConfig, _compute_bbox, _model_horizontal_scale_mm_per_meter, estimate_relief_mm
+from .pipeline import (
+    GenerateConfig,
+    _DETAIL_MIN_LENGTH_MM,
+    _DETAIL_RESAMPLE_MM,
+    _DETAIL_SIMPLIFY_TOL_MM,
+    _GREEN_LANDUSE,
+    _GREEN_LEISURE,
+    _GREEN_MIN_LENGTH_MM,
+    _GREEN_RESAMPLE_MM,
+    _GREEN_SIMPLIFY_TOL_MM,
+    _GREEN_LANDUSE_QUERY,
+    _GREEN_LEISURE_QUERY,
+    _HIGHWAY_QUERY,
+    _HIGHWAY_TYPES,
+    _WATERWAY_QUERY,
+    _WATERWAY_TYPES,
+    _WATER_MIN_LENGTH_MM,
+    _WATER_RESAMPLE_MM,
+    _WATER_SIMPLIFY_TOL_MM,
+    _compute_bbox,
+    _enhance_dem_relief,
+    _model_horizontal_scale_mm_per_meter,
+    _normalize_line_segments,
+    estimate_relief_mm,
+)
 
 
 def _resolve_blender_script_path() -> Path:
@@ -130,9 +154,11 @@ def _compute_dem_metrics(
         if not np.any(valid_mask):
             raise ValueError("Ritaglio DEM privo di valori validi.")
 
-        z_min_src = float(np.min(dem[valid_mask]))
-        z_max_src = float(np.max(dem[valid_mask]))
-        dem_filled = np.where(valid_mask, dem, z_min_src)
+        fill_value = float(np.min(dem[valid_mask]))
+        dem_filled = np.where(valid_mask, dem, fill_value)
+        dem_filled = _enhance_dem_relief(dem_filled)
+        z_min_src = float(np.min(dem_filled))
+        z_max_src = float(np.max(dem_filled))
         z_range_src = max(z_max_src - z_min_src, 0.0)
         normalized01 = (
             np.zeros_like(dem_filled, dtype=np.float64)
@@ -188,10 +214,10 @@ def _fetch_osm_layers(points_lonlat: np.ndarray, model_w: float, model_h: float)
 [out:json][timeout:25];
 (
   way["natural"="water"]({s},{w},{n},{e});
-  way["waterway"]({s},{w},{n},{e});
-  way["landuse"~"forest|meadow|grass"]({s},{w},{n},{e});
-  way["leisure"~"park|garden"]({s},{w},{n},{e});
-  way["highway"~"motorway|trunk|primary"]({s},{w},{n},{e});
+  way["waterway"~"{_WATERWAY_QUERY}"]({s},{w},{n},{e});
+  way["landuse"~"{_GREEN_LANDUSE_QUERY}"]({s},{w},{n},{e});
+  way["leisure"~"{_GREEN_LEISURE_QUERY}"]({s},{w},{n},{e});
+  way["highway"~"{_HIGHWAY_QUERY}"]({s},{w},{n},{e});
 );
 out geom;
 """
@@ -211,13 +237,49 @@ out geom;
             continue
         line = [[(p["lon"] - w) / dx * model_w, (p["lat"] - s) / dy * model_h] for p in geom]
         tags = el.get("tags", {})
-        if tags.get("natural") == "water" or "waterway" in tags:
+        waterway = tags.get("waterway")
+        highway = tags.get("highway")
+        if tags.get("natural") == "water" or waterway in _WATERWAY_TYPES:
             layers["water"].append(line)
-        elif tags.get("landuse") in {"forest", "meadow", "grass"} or tags.get("leisure") in {"park", "garden"}:
+        elif tags.get("landuse") in _GREEN_LANDUSE or tags.get("leisure") in _GREEN_LEISURE:
             layers["green"].append(line)
-        elif tags.get("highway") in {"motorway", "trunk", "primary"}:
+        elif highway in _HIGHWAY_TYPES:
             layers["detail"].append(line)
-    return layers
+    def _normalize_layer(
+        raw_lines: list[list[list[float]]],
+        simplify_tolerance_mm: float,
+        resample_spacing_mm: float,
+        min_length_mm: float,
+    ) -> list[list[list[float]]]:
+        arrays = [np.asarray(line, dtype=np.float64) for line in raw_lines if len(line) >= 2]
+        normalized = _normalize_line_segments(
+            arrays,
+            simplify_tolerance_mm=simplify_tolerance_mm,
+            resample_spacing_mm=resample_spacing_mm,
+            min_length_mm=min_length_mm,
+        )
+        return [[[float(p[0]), float(p[1])] for p in segment] for segment in normalized]
+
+    return {
+        "water": _normalize_layer(
+            layers["water"],
+            simplify_tolerance_mm=_WATER_SIMPLIFY_TOL_MM,
+            resample_spacing_mm=_WATER_RESAMPLE_MM,
+            min_length_mm=_WATER_MIN_LENGTH_MM,
+        ),
+        "green": _normalize_layer(
+            layers["green"],
+            simplify_tolerance_mm=_GREEN_SIMPLIFY_TOL_MM,
+            resample_spacing_mm=_GREEN_RESAMPLE_MM,
+            min_length_mm=_GREEN_MIN_LENGTH_MM,
+        ),
+        "detail": _normalize_layer(
+            layers["detail"],
+            simplify_tolerance_mm=_DETAIL_SIMPLIFY_TOL_MM,
+            resample_spacing_mm=_DETAIL_RESAMPLE_MM,
+            min_length_mm=_DETAIL_MIN_LENGTH_MM,
+        ),
+    }
 
 
 def _prepare_job_assets(
