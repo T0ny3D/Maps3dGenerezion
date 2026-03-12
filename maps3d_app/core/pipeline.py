@@ -224,7 +224,7 @@ def _prepare_dem_grid(
     ds: rasterio.io.DatasetReader,
     points_dem: np.ndarray,
     config: GenerateConfig,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, rasterio.windows.Window]:
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, rasterio.windows.Window, float]:
     minx, miny, maxx, maxy = _compute_bbox(points_dem, config.bbox_margin_ratio)
     window = rasterio.windows.from_bounds(minx, miny, maxx, maxy, transform=ds.transform)
     window = window.round_offsets().round_lengths()
@@ -246,11 +246,12 @@ def _prepare_dem_grid(
 
     dem = _fill_dem_nans(dem)
     dem = _enhance_dem_relief(dem)
+    min_elev = float(np.nanmin(dem))
 
     rows, cols = dem.shape
     x_coords = win_t.c + (np.arange(cols) + 0.5) * win_t.a
     y_coords = win_t.f + (np.arange(rows) + 0.5) * win_t.e
-    return dem, x_coords, y_coords, window
+    return dem, x_coords, y_coords, window, min_elev
 
 
 def _python_output_paths(stl_output_path: str | Path, test_mode: bool) -> dict[str, Path]:
@@ -399,7 +400,7 @@ def run_python_pipeline(
         x_dem, y_dem = to_dem.transform(points_lonlat[:, 0], points_lonlat[:, 1])
         points_dem = np.column_stack((x_dem, y_dem))
 
-        dem, x_coords, y_coords, window = _prepare_dem_grid(ds, points_dem, config)
+        dem, x_coords, y_coords, window, min_elev = _prepare_dem_grid(ds, points_dem, config)
 
         x_min, x_max = float(np.min(x_coords)), float(np.max(x_coords))
         y_min, y_max = float(np.min(y_coords)), float(np.max(y_coords))
@@ -423,7 +424,6 @@ def run_python_pipeline(
             y_mm = y_mm[::-1]
             dem = np.flipud(dem)
 
-        min_elev = float(np.nanmin(dem))
         horiz_scale_mm_per_meter = _model_horizontal_scale_mm_per_meter(ds, window, config.model_width_mm, config.model_height_mm)
         z_mm = (dem - min_elev) * horiz_scale_mm_per_meter * config.vertical_scale
 
@@ -597,7 +597,7 @@ def estimate_relief_mm(gpx_path: str | Path, dem_path: str | Path, params: Gener
         x_dem, y_dem = to_dem.transform(points_lonlat[:, 0], points_lonlat[:, 1])
         points_dem = np.column_stack((x_dem, y_dem))
 
-        dem, _, _, window = _prepare_dem_grid(ds, points_dem, params)
+        dem, _, _, window, _ = _prepare_dem_grid(ds, points_dem, params)
         z_min = float(np.nanmin(dem))
         z_max = float(np.nanmax(dem))
 
