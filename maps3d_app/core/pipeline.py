@@ -33,7 +33,7 @@ _TRACK_MIN_LENGTH_MM = 3.0
 _TRACK_MIN_WIDTH_MM = 1.5
 _TRACK_MAX_WIDTH_MM = 3.2
 _TRACK_CLEARANCE_MULTIPLIER = 2.0
-_WATERWAY_TYPES = {"river", "canal"}
+_WATERWAY_TYPES = {"river", "canal"}  # Keep only dominant waterways to reduce clutter.
 _GREEN_LANDUSE = {"forest", "meadow", "grass", "wood"}
 _GREEN_LEISURE = {"park", "garden"}
 _HIGHWAY_TYPES = {"motorway", "trunk", "primary"}
@@ -65,7 +65,6 @@ _GREEN_LAYER_HEIGHT_MM = 1.1
 _GREEN_LAYER_WIDTH_MM = 2.4
 _DETAIL_LAYER_HEIGHT_MM = 0.25
 _DETAIL_LAYER_WIDTH_MM = 0.55
-_TRACK_INLAY_BASE_OFFSET_MM = -0.22
 _OSM_SCORE_BASE = 0.65
 _WATER_TOP_RADIUS_MAX_MM = 0.9
 _WATER_TOP_RADIUS_RATIO = 0.4
@@ -239,6 +238,7 @@ def _relief_contrast(values: np.ndarray, strength: float) -> np.ndarray:
     if strength <= 0:
         return values
     centered = values - 0.5
+    # Map tanh output from [-1, 1] back to [0, 1] for contrast shaping.
     adjusted = 0.5 + np.tanh(centered * strength) * 0.5
     return np.clip(adjusted, 0.0, 1.0)
 
@@ -399,6 +399,7 @@ def _select_top_segments(
         span_ratio = _segment_span_ratio(segment, model_span)
         if span_ratio < min_span_ratio:
             continue
+        # Favor longer segments that span more of the model for clearer hierarchy.
         score = length * (_OSM_SCORE_BASE + span_ratio)
         scored.append((score, length, segment))
 
@@ -547,7 +548,6 @@ def run_python_pipeline(
         layer_height_mm=config.track_height_mm,
         layer_width_mm=min(track_width_mm, _TRACK_MAX_WIDTH_MM),
         top_radius_mm=config.track_top_radius_mm,
-        base_offset_mm=_TRACK_INLAY_BASE_OFFSET_MM,
     )
 
     clipped_water_segments = [

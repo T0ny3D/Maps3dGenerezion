@@ -4,12 +4,13 @@ import numpy as np
 import trimesh
 
 
-_TRACK_BASE_OFFSET_MM = -0.18
+_TRACK_BASE_OFFSET_MM = -0.22
 _TRACK_SMOOTH_WINDOW = 11
 _TRACK_PROFILE_SHOULDER_RATIO = 0.82
 _TRACK_PROFILE_SHOULDER_HEIGHT_RATIO = 0.55
 _TRACK_PROFILE_TOP_MIN_RATIO = 0.35
 _TRACK_PROFILE_TOP_MAX_RATIO = 0.55
+_TRACK_PROFILE_MIN_ARC_POINTS = 3
 
 
 def _grid_index(row: int, col: int, cols: int) -> int:
@@ -123,7 +124,7 @@ def _track_profile_offsets(
         arc = [(-half_top, height), (half_top, height)]
     else:
         half_top = min(half_top, radius)
-        arc_x = np.linspace(-half_top, half_top, num=max(3, arc_points))
+        arc_x = np.linspace(-half_top, half_top, num=max(_TRACK_PROFILE_MIN_ARC_POINTS, arc_points))
         arc_z = height - radius + np.sqrt(np.clip(radius * radius - arc_x * arc_x, 0.0, None))
         arc = list(zip(arc_x, arc_z))
     profile: list[tuple[float, float]] = [(-half_base, 0.0), (-shoulder_half, shoulder_height)]
@@ -136,6 +137,7 @@ def _track_profile_offsets(
 def _safe_normal(vec: np.ndarray) -> np.ndarray:
     norm = np.linalg.norm(vec)
     if norm < 1e-6:
+        # Deterministic fallback for degenerate segments.
         return np.array([1.0, 0.0], dtype=np.float64)
     return vec / norm
 
