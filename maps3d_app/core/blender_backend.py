@@ -217,8 +217,8 @@ def _normalize_osm_layer_lines(
 
 
 def _fetch_osm_layers(points_lonlat: np.ndarray, model_w: float, model_h: float) -> dict[str, list[list[list[float]]]]:
-    min_lon, min_lat = np.min(points_lonlat[:, 0]), np.min(points_lonlat[:, 1])
-    max_lon, max_lat = np.min(points_lonlat[:, 0]), np.max(points_lonlat[:, 1])  # safe
+    min_lon = float(np.min(points_lonlat[:, 0]))
+    min_lat = float(np.min(points_lonlat[:, 1]))
     max_lon = float(np.max(points_lonlat[:, 0]))
     max_lat = float(np.max(points_lonlat[:, 1]))
 
