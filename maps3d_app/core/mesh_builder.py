@@ -125,6 +125,7 @@ def _track_profile_offsets(
     else:
         clamped_half_top = min(half_top, radius)
         arc_x = np.linspace(-clamped_half_top, clamped_half_top, num=max(_TRACK_PROFILE_MIN_ARC_POINTS, arc_points))
+        # Circular crown arc centered at (0, height - radius) for a rounded top.
         arc_z = height - radius + np.sqrt(np.clip(radius * radius - arc_x * arc_x, 0.0, None))
         arc = list(zip(arc_x, arc_z))
     profile: list[tuple[float, float]] = [(-half_base, 0.0), (-shoulder_half, shoulder_height)]
@@ -140,6 +141,23 @@ def _safe_normal(vec: np.ndarray) -> np.ndarray:
         # Deterministic fallback for degenerate segments.
         return np.array([1.0, 0.0], dtype=np.float64)
     return vec / norm
+
+
+def _profile_centroid(profile: list[tuple[float, float]]) -> np.ndarray:
+    coords = np.asarray(profile, dtype=np.float64)
+    if coords.shape[0] < 3:
+        return np.array([0.0, float(np.mean(coords[:, 1])) if coords.size else 0.0], dtype=np.float64)
+    x = coords[:, 0]
+    y = coords[:, 1]
+    x2 = np.append(x, x[0])
+    y2 = np.append(y, y[0])
+    cross = x2[:-1] * y2[1:] - x2[1:] * y2[:-1]
+    area = np.sum(cross) * 0.5
+    if abs(area) < 1e-9:
+        return np.array([float(np.mean(x)), float(np.mean(y))], dtype=np.float64)
+    cx = np.sum((x2[:-1] + x2[1:]) * cross) / (6.0 * area)
+    cy = np.sum((y2[:-1] + y2[1:]) * cross) / (6.0 * area)
+    return np.array([cx, cy], dtype=np.float64)
 
 
 def build_track_mesh(
@@ -176,6 +194,7 @@ def build_track_mesh(
     normals = np.column_stack((-tangents_np[:, 1], tangents_np[:, 0]))
 
     profile = _track_profile_offsets(track_width_mm, track_height_mm, top_radius_mm)
+    profile_center = _profile_centroid(profile)
     profile_count = len(profile)
     vertices = np.zeros((len(track_xy_mm) * profile_count, 3), dtype=np.float64)
     for i, center in enumerate(track_xy_mm):
@@ -189,7 +208,8 @@ def build_track_mesh(
     for i in range(len(track_xy_mm) - 1):
         start = i * profile_count
         nxt = (i + 1) * profile_count
-        # Close the profile loop so the sweep produces a solid (non-hollow) track.
+        # Close the profile loop (last -> first) so the sweep produces a solid track without
+        # duplicating vertices in the profile definition.
         for j in range(profile_count):
             j_next = (j + 1) % profile_count
             v0 = start + j
@@ -199,8 +219,24 @@ def build_track_mesh(
             faces.append([v0, v2, v1])
             faces.append([v1, v2, v3])
 
-    cap_start = vertices[:profile_count].mean(axis=0)
-    cap_end = vertices[-profile_count:].mean(axis=0)
+    start_center = track_xy_mm[0]
+    end_center = track_xy_mm[-1]
+    cap_start = np.array(
+        [
+            start_center[0] + normals[0][0] * profile_center[0],
+            start_center[1] + normals[0][1] * profile_center[0],
+            z_samples[0] + profile_center[1],
+        ],
+        dtype=np.float64,
+    )
+    cap_end = np.array(
+        [
+            end_center[0] + normals[-1][0] * profile_center[0],
+            end_center[1] + normals[-1][1] * profile_center[0],
+            z_samples[-1] + profile_center[1],
+        ],
+        dtype=np.float64,
+    )
     cap_start_idx = len(vertices)
     cap_end_idx = cap_start_idx + 1
     vertices = np.vstack((vertices, cap_start, cap_end))

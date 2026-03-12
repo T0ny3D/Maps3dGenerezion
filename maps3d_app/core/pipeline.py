@@ -238,7 +238,8 @@ def _relief_contrast(values: np.ndarray, strength: float) -> np.ndarray:
     if strength <= 0:
         return values
     centered = values - 0.5
-    # Map tanh output from [-1, 1] back to [0, 1] to boost midtone separation for clearer relief.
+    # Map tanh output from [-1, 1] back to [0, 1] to apply an S-curve that emphasizes mid-range
+    # transitions while preserving peaks/valleys.
     adjusted = 0.5 + np.tanh(centered * strength) * 0.5
     return np.clip(adjusted, 0.0, 1.0)
 
@@ -399,14 +400,15 @@ def _select_top_segments(
         span_ratio = _segment_span_ratio(segment, model_span)
         if span_ratio < min_span_ratio:
             continue
-        # Favor longer segments that span more of the model for clearer hierarchy, with a baseline
-        # bias to keep dominant features even when span_ratio is modest.
+        # Favor longer segments that span more of the model for clearer hierarchy; the base term
+        # keeps dominant features visible even when span_ratio is modest.
         score = length * (_OSM_SCORE_BASE + span_ratio)
         scored.append((score, length, segment))
 
     if not scored:
         longest = max(segments, key=_line_length)
-        return [longest] if _line_length(longest) > 0 else []
+        longest_length = _line_length(longest)
+        return [longest] if longest_length > 0 else []
 
     scored.sort(key=lambda item: item[0], reverse=True)
     selected: list[np.ndarray] = []
