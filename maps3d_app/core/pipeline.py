@@ -25,6 +25,7 @@ _RELIEF_GAMMA = 0.88
 _TRACK_SIMPLIFY_TOL_MM = 0.25
 _TRACK_RESAMPLE_MM = 0.8
 _TRACK_MIN_LENGTH_MM = 2.0
+_TRACK_MIN_WIDTH_MM = 1.4
 _WATER_SIMPLIFY_TOL_MM = 0.4
 _WATER_RESAMPLE_MM = 1.2
 _WATER_MIN_LENGTH_MM = 5.0
@@ -428,7 +429,7 @@ def run_python_pipeline(
         resample_spacing_mm=_TRACK_RESAMPLE_MM,
         min_length_mm=_TRACK_MIN_LENGTH_MM,
     )
-    track_width_mm = max(1.4, config.groove_width_mm - 2.0 * config.track_clearance_mm)
+    track_width_mm = max(_TRACK_MIN_WIDTH_MM, config.groove_width_mm - 2.0 * config.track_clearance_mm)
     track_mesh = build_line_layer_mesh(
         line_segments_xy_mm=clipped_track_segments,
         x_mm=x_mm,
