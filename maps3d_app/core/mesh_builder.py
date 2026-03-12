@@ -206,5 +206,3 @@ def build_rect_frame_mesh(
     ]
 
     return trimesh.util.concatenate(parts)
-
- main
