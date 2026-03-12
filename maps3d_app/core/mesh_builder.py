@@ -4,7 +4,7 @@ import numpy as np
 import trimesh
 
 
-_TRACK_BASE_OFFSET_MM = -0.22  # Slightly seat the inlay into the terrain for a premium fit.
+_TRACK_BASE_OFFSET_MM = -0.22  # Negative offset seats the inlay below terrain surface for flush integration.
 _TRACK_SMOOTH_WINDOW = 11
 _TRACK_PROFILE_SHOULDER_RATIO = 0.82
 _TRACK_PROFILE_SHOULDER_HEIGHT_RATIO = 0.55
@@ -115,6 +115,7 @@ def _track_profile_offsets(
 ) -> list[tuple[float, float]]:
     width = max(track_width_mm, 0.1)
     height = max(track_height_mm, 0.1)
+    arc_points = max(arc_points, _TRACK_PROFILE_MIN_ARC_POINTS)
     half_base = width * 0.5
     shoulder_half = half_base * _TRACK_PROFILE_SHOULDER_RATIO
     shoulder_height = height * _TRACK_PROFILE_SHOULDER_HEIGHT_RATIO
@@ -124,7 +125,7 @@ def _track_profile_offsets(
         arc = [(-half_top, height), (half_top, height)]
     else:
         clamped_half_top = min(half_top, radius)
-        arc_x = np.linspace(-clamped_half_top, clamped_half_top, num=max(_TRACK_PROFILE_MIN_ARC_POINTS, arc_points))
+        arc_x = np.linspace(-clamped_half_top, clamped_half_top, num=arc_points)
         # Circular crown arc centered at (0, height - radius) for a rounded top.
         arc_z = height - radius + np.sqrt(np.clip(radius * radius - arc_x * arc_x, 0.0, None))
         arc = list(zip(arc_x, arc_z))
@@ -147,6 +148,7 @@ def _profile_centroid(profile: list[tuple[float, float]]) -> np.ndarray:
     coords = np.asarray(profile, dtype=np.float64)
     if coords.shape[0] < 3:
         return np.array([0.0, float(np.mean(coords[:, 1])) if coords.size else 0.0], dtype=np.float64)
+    # Compute centroid using the shoelace formula for a closed polygon profile.
     x = coords[:, 0]
     y = coords[:, 1]
     x2 = np.append(x, x[0])
@@ -208,8 +210,8 @@ def build_track_mesh(
     for i in range(len(track_xy_mm) - 1):
         start = i * profile_count
         nxt = (i + 1) * profile_count
-        # Close the profile loop (last -> first) so the sweep produces a solid track without
-        # duplicating vertices in the profile definition.
+        # Close the open profile loop (last -> first) so the sweep produces a solid track without
+        # duplicating the first vertex in the profile definition.
         for j in range(profile_count):
             j_next = (j + 1) % profile_count
             v0 = start + j

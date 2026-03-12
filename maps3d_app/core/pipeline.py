@@ -24,6 +24,8 @@ _RELIEF_DETAIL_BOOST_FINE = 0.85  # Unsharp-mask strength for micro detail.
 _RELIEF_DETAIL_BOOST_COARSE = 0.45  # Medium-scale ridge emphasis.
 _RELIEF_GAMMA = 0.78  # Gamma lift to improve relief readability.
 _RELIEF_CONTRAST = 1.18  # S-curve contrast for stronger relief separation.
+_RELIEF_CONTRAST_CENTER = 0.5
+_RELIEF_CONTRAST_SCALE = 0.5
 _RELIEF_SMOOTH_RADIUS_FINE = 1  # Box-filter radius for micro relief.
 _RELIEF_SMOOTH_RADIUS_COARSE = 5  # Box-filter radius for macro relief.
 _RELIEF_MAX_CELLS = 2_000_000
@@ -33,7 +35,7 @@ _TRACK_MIN_LENGTH_MM = 3.0
 _TRACK_MIN_WIDTH_MM = 1.5
 _TRACK_MAX_WIDTH_MM = 3.2
 _TRACK_CLEARANCE_MULTIPLIER = 2.0
-_WATERWAY_TYPES = {"river", "canal"}  # Keep only dominant waterways to reduce clutter.
+_WATERWAY_TYPES = {"river", "canal"}  # Exclude small streams to keep only dominant waterways.
 _GREEN_LANDUSE = {"forest", "meadow", "grass", "wood"}
 _GREEN_LEISURE = {"park", "garden"}
 _HIGHWAY_TYPES = {"motorway", "trunk", "primary"}
@@ -65,7 +67,7 @@ _GREEN_LAYER_HEIGHT_MM = 1.1
 _GREEN_LAYER_WIDTH_MM = 2.4
 _DETAIL_LAYER_HEIGHT_MM = 0.25
 _DETAIL_LAYER_WIDTH_MM = 0.55
-_OSM_SCORE_BASE = 0.65
+_OSM_SCORE_BASE = 0.65  # Dimensionless weighting (0-1) for baseline feature importance.
 _WATER_TOP_RADIUS_MAX_MM = 0.9
 _WATER_TOP_RADIUS_RATIO = 0.4
 _GREEN_TOP_RADIUS_MAX_MM = 0.7
@@ -237,10 +239,10 @@ def _box_filter(values: np.ndarray, radius: int = 1) -> np.ndarray:
 def _relief_contrast(values: np.ndarray, strength: float) -> np.ndarray:
     if strength <= 0:
         return values
-    centered = values - 0.5
+    centered = values - _RELIEF_CONTRAST_CENTER
     # Map tanh output from [-1, 1] back to [0, 1] to apply an S-curve that emphasizes mid-range
     # transitions while preserving peaks/valleys.
-    adjusted = 0.5 + np.tanh(centered * strength) * 0.5
+    adjusted = _RELIEF_CONTRAST_CENTER + np.tanh(centered * strength) * _RELIEF_CONTRAST_SCALE
     return np.clip(adjusted, 0.0, 1.0)
 
 
@@ -406,8 +408,7 @@ def _select_top_segments(
         scored.append((score, length, segment))
 
     if not scored:
-        longest = max(segments, key=_line_length)
-        longest_length = _line_length(longest)
+        longest_length, longest = max(((_line_length(segment), segment) for segment in segments), key=lambda item: item[0])
         return [longest] if longest_length > 0 else []
 
     scored.sort(key=lambda item: item[0], reverse=True)
