@@ -17,7 +17,7 @@ Everything else is automatic:
 2. Compute bbox with margin
 3. Download SRTM DEM for bbox (cached)
 4. Generate model at exactly **120x120mm**
-5. Generate STL parts via **Blender backend** (preferred)
+5. Generate STL parts via the **Python-first pipeline** (primary path)
 6. Pack parts into a single **Bambu Studio 3MF** with objects named:
    - base, water, green, detail, track, frame
    and suggested RGBA colors:
@@ -47,8 +47,8 @@ Test mode adds suffix `_test` before extension.
 - Bambu Studio latest should import the 3MF as separate objects; embedded colors are **hints**
 
 ## Blender requirement
-Blender is the preferred geometry backend (boolean groove + inlay + frame + optional OSM layers).
+Blender is a **legacy fallback** backend (boolean groove + inlay + frame + optional OSM layers).
 The app should:
 - auto-detect Blender if possible (common install paths),
 - otherwise allow selecting `blender.exe` once and remember it.
-If Blender is not available, fall back to the pure Python pipeline (terrain + simple raised track).
+If Blender is not available, keep using the pure Python pipeline (terrain + simple raised track).
