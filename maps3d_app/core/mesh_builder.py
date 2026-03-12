@@ -4,7 +4,7 @@ import numpy as np
 import trimesh
 
 
-_TRACK_BASE_OFFSET_MM = -0.22
+_TRACK_BASE_OFFSET_MM = -0.22  # Slightly seat the inlay into the terrain for a premium fit.
 _TRACK_SMOOTH_WINDOW = 11
 _TRACK_PROFILE_SHOULDER_RATIO = 0.82
 _TRACK_PROFILE_SHOULDER_HEIGHT_RATIO = 0.55
@@ -123,8 +123,8 @@ def _track_profile_offsets(
     if radius <= 1e-3:
         arc = [(-half_top, height), (half_top, height)]
     else:
-        half_top = min(half_top, radius)
-        arc_x = np.linspace(-half_top, half_top, num=max(_TRACK_PROFILE_MIN_ARC_POINTS, arc_points))
+        clamped_half_top = min(half_top, radius)
+        arc_x = np.linspace(-clamped_half_top, clamped_half_top, num=max(_TRACK_PROFILE_MIN_ARC_POINTS, arc_points))
         arc_z = height - radius + np.sqrt(np.clip(radius * radius - arc_x * arc_x, 0.0, None))
         arc = list(zip(arc_x, arc_z))
     profile: list[tuple[float, float]] = [(-half_base, 0.0), (-shoulder_half, shoulder_height)]
@@ -189,6 +189,7 @@ def build_track_mesh(
     for i in range(len(track_xy_mm) - 1):
         start = i * profile_count
         nxt = (i + 1) * profile_count
+        # Close the profile loop so the sweep produces a solid (non-hollow) track.
         for j in range(profile_count):
             j_next = (j + 1) % profile_count
             v0 = start + j

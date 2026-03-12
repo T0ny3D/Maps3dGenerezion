@@ -238,7 +238,7 @@ def _relief_contrast(values: np.ndarray, strength: float) -> np.ndarray:
     if strength <= 0:
         return values
     centered = values - 0.5
-    # Map tanh output from [-1, 1] back to [0, 1] for contrast shaping.
+    # Map tanh output from [-1, 1] back to [0, 1] to boost midtone separation for clearer relief.
     adjusted = 0.5 + np.tanh(centered * strength) * 0.5
     return np.clip(adjusted, 0.0, 1.0)
 
@@ -399,7 +399,8 @@ def _select_top_segments(
         span_ratio = _segment_span_ratio(segment, model_span)
         if span_ratio < min_span_ratio:
             continue
-        # Favor longer segments that span more of the model for clearer hierarchy.
+        # Favor longer segments that span more of the model for clearer hierarchy, with a baseline
+        # bias to keep dominant features even when span_ratio is modest.
         score = length * (_OSM_SCORE_BASE + span_ratio)
         scored.append((score, length, segment))
 
