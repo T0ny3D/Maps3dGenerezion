@@ -204,6 +204,8 @@ out geom;
 
 
 
+
+ main
  main
 def _export_mesh_or_remove(path: Path, mesh: trimesh.Trimesh) -> None:
     if mesh.faces.shape[0] > 0:
@@ -318,6 +320,7 @@ def run_python_pipeline(
         layer_height_mm=0.7,
         layer_width_mm=1.8,
 
+
         x_mm=x_mm,
         y_mm=y_mm,
         z_mm=z_mm,
@@ -339,6 +342,7 @@ def run_python_pipeline(
         z_mm=z_mm,
         layer_height_mm=0.4,
         layer_width_mm=0.9,
+ main
  main
     )
     green_mesh = build_line_layer_mesh(
