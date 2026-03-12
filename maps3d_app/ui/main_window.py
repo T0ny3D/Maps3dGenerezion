@@ -27,8 +27,8 @@ from ..core.pipeline import (
     GenerateConfig,
     compute_gpx_bbox_lonlat,
     default_dem_output_path_for_gpx,
-    run_pipeline,
     estimate_relief_mm,
+    run_pipeline,
 )
 from .preview3d import Preview3DWidget
 
