@@ -26,6 +26,7 @@ _TRACK_SIMPLIFY_TOL_MM = 0.25
 _TRACK_RESAMPLE_MM = 0.8
 _TRACK_MIN_LENGTH_MM = 2.0
 _TRACK_MIN_WIDTH_MM = 1.4
+_TRACK_MAX_WIDTH_MM = 3.0
 _WATER_SIMPLIFY_TOL_MM = 0.4
 _WATER_RESAMPLE_MM = 1.2
 _WATER_MIN_LENGTH_MM = 5.0
@@ -74,17 +75,17 @@ def _extract_line_segments(geom: object) -> list[np.ndarray]:
         coords = np.asarray(geom.coords, dtype=np.float64)
         return [coords] if len(coords) >= 2 else []
     if isinstance(geom, MultiLineString):
-        segs: list[np.ndarray] = []
+        segments: list[np.ndarray] = []
         for line in geom.geoms:
             coords = np.asarray(line.coords, dtype=np.float64)
             if len(coords) >= 2:
-                segs.append(coords)
-        return segs
+                segments.append(coords)
+        return segments
     if isinstance(geom, GeometryCollection):
-        segs: list[np.ndarray] = []
+        segments: list[np.ndarray] = []
         for child in geom.geoms:
-            segs.extend(_extract_line_segments(child))
-        return segs
+            segments.extend(_extract_line_segments(child))
+        return segments
     return []
 
 
@@ -436,7 +437,7 @@ def run_python_pipeline(
         y_mm=y_mm,
         z_mm=z_mm,
         layer_height_mm=config.track_height_mm,
-        layer_width_mm=min(track_width_mm, 3.0),
+        layer_width_mm=min(track_width_mm, _TRACK_MAX_WIDTH_MM),
     )
 
     clipped_water_segments = [
