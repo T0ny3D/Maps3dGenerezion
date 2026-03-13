@@ -40,6 +40,12 @@ In **Test incastro 40×40** i nomi diventano `*_test_...stl`.
 - `track_relief_mm` (default 0.6)
 - `track_top_radius_mm` (default 0.8)
 
+## Profili qualità (pipeline Python)
+
+- **Fast**: mesh rapida per prove (`grid_res` ~200, dettaglio ridotto)
+- **High**: bilanciato (default; `grid_res` ~450, dettaglio migliorato)
+- **Ultra**: massima definizione (`grid_res` ~900, semplificazione linee ridotta, più elementi OSM mantenuti)
+
 ## Workflow Bambu Studio (consigliato)
 
 1. Importa `*_base_brown.stl`, `*_water.stl`, `*_green.stl`, `*_detail.stl` come **multi-part object**.

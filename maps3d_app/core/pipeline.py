@@ -135,6 +135,7 @@ class GenerateConfig:
     track_height_mm: float = 2.0
     bbox_margin_ratio: float = 0.10
     grid_res: int = 400
+    detail_boost: float = 1.0
 
     separate_frame: bool = True
     frame_text_enabled: bool = True
@@ -169,6 +170,17 @@ class GenerateConfig:
     track_clearance_mm: float = 0.20
     track_relief_mm: float = 0.6
     track_top_radius_mm: float = 0.8
+
+
+def _quality_tuned(value: float, detail_boost: float, floor: float = 0.0) -> float:
+    boost = max(0.6, min(detail_boost, 2.4))
+    tuned = value / boost
+    return max(floor, tuned)
+
+
+def _quality_tuned_segments(value: int, detail_boost: float) -> int:
+    boost = max(0.6, min(detail_boost, 2.4))
+    return max(1, int(round(value * boost)))
 
 
 def _compute_bbox(points: np.ndarray, margin_ratio: float) -> tuple[float, float, float, float]:
@@ -289,7 +301,13 @@ def _prepare_dem_grid(
         dem, win_t = _resample_dem_grid(dem, win_t, ds.crs, bounds, target_rows, target_cols)
 
     dem = _fill_dem_nans(dem)
-    dem = _enhance_dem_relief(dem)
+    enhanced_dem = _enhance_dem_relief(dem)
+    blend = max(0.0, min(config.detail_boost, 2.0))
+    if blend <= 1.0:
+        dem = dem * (1.0 - blend) + enhanced_dem * blend
+    else:
+        extra = _enhance_dem_relief(enhanced_dem)
+        dem = enhanced_dem * (2.0 - blend) + extra * (blend - 1.0)
     min_elev = float(np.nanmin(dem))
 
     rows, cols = dem.shape
@@ -536,8 +554,8 @@ def run_python_pipeline(
     clipped_track_segments = _clip_polyline_to_footprint(track_xy_mm, config.model_width_mm, config.model_height_mm)
     clipped_track_segments = _normalize_line_segments(
         clipped_track_segments,
-        simplify_tolerance_mm=_TRACK_SIMPLIFY_TOL_MM,
-        resample_spacing_mm=_TRACK_RESAMPLE_MM,
+        simplify_tolerance_mm=_quality_tuned(_TRACK_SIMPLIFY_TOL_MM, config.detail_boost, floor=0.15),
+        resample_spacing_mm=_quality_tuned(_TRACK_RESAMPLE_MM, config.detail_boost, floor=0.35),
         min_length_mm=_TRACK_MIN_LENGTH_MM,
     )
     raw_track_width_mm = max(
@@ -572,20 +590,20 @@ def run_python_pipeline(
     ]
     clipped_water_segments = _normalize_line_segments(
         clipped_water_segments,
-        simplify_tolerance_mm=_WATER_SIMPLIFY_TOL_MM,
-        resample_spacing_mm=_WATER_RESAMPLE_MM,
+        simplify_tolerance_mm=_quality_tuned(_WATER_SIMPLIFY_TOL_MM, config.detail_boost, floor=0.25),
+        resample_spacing_mm=_quality_tuned(_WATER_RESAMPLE_MM, config.detail_boost, floor=0.7),
         min_length_mm=_WATER_MIN_LENGTH_MM,
     )
     clipped_green_segments = _normalize_line_segments(
         clipped_green_segments,
-        simplify_tolerance_mm=_GREEN_SIMPLIFY_TOL_MM,
-        resample_spacing_mm=_GREEN_RESAMPLE_MM,
+        simplify_tolerance_mm=_quality_tuned(_GREEN_SIMPLIFY_TOL_MM, config.detail_boost, floor=0.25),
+        resample_spacing_mm=_quality_tuned(_GREEN_RESAMPLE_MM, config.detail_boost, floor=0.7),
         min_length_mm=_GREEN_MIN_LENGTH_MM,
     )
     clipped_detail_segments = _normalize_line_segments(
         clipped_detail_segments,
-        simplify_tolerance_mm=_DETAIL_SIMPLIFY_TOL_MM,
-        resample_spacing_mm=_DETAIL_RESAMPLE_MM,
+        simplify_tolerance_mm=_quality_tuned(_DETAIL_SIMPLIFY_TOL_MM, config.detail_boost, floor=0.2),
+        resample_spacing_mm=_quality_tuned(_DETAIL_RESAMPLE_MM, config.detail_boost, floor=0.6),
         min_length_mm=_DETAIL_MIN_LENGTH_MM,
     )
 
@@ -594,7 +612,7 @@ def run_python_pipeline(
         clipped_water_segments,
         model_width_mm=config.model_width_mm,
         model_height_mm=config.model_height_mm,
-        max_segments=_WATER_MAX_SEGMENTS,
+        max_segments=_quality_tuned_segments(_WATER_MAX_SEGMENTS, config.detail_boost),
         min_length_mm=_WATER_MIN_LENGTH_MM,
         max_total_length_mm=model_span_mm * _WATER_MAX_TOTAL_RATIO,
         min_span_ratio=_WATER_MIN_SPAN_RATIO,
@@ -603,7 +621,7 @@ def run_python_pipeline(
         clipped_green_segments,
         model_width_mm=config.model_width_mm,
         model_height_mm=config.model_height_mm,
-        max_segments=_GREEN_MAX_SEGMENTS,
+        max_segments=_quality_tuned_segments(_GREEN_MAX_SEGMENTS, config.detail_boost),
         min_length_mm=_GREEN_MIN_LENGTH_MM,
         max_total_length_mm=model_span_mm * _GREEN_MAX_TOTAL_RATIO,
         min_span_ratio=_GREEN_MIN_SPAN_RATIO,
@@ -612,7 +630,7 @@ def run_python_pipeline(
         clipped_detail_segments,
         model_width_mm=config.model_width_mm,
         model_height_mm=config.model_height_mm,
-        max_segments=_DETAIL_MAX_SEGMENTS,
+        max_segments=_quality_tuned_segments(_DETAIL_MAX_SEGMENTS, config.detail_boost),
         min_length_mm=_DETAIL_MIN_LENGTH_MM,
         max_total_length_mm=model_span_mm * _DETAIL_MAX_TOTAL_RATIO,
         min_span_ratio=_DETAIL_MIN_SPAN_RATIO,
