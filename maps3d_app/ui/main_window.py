@@ -32,7 +32,8 @@ from ..core.pipeline import (
 )
 from .preview3d import Preview3DWidget
 
-QUALITY_TO_GRID = {"fast": 200, "high": 400, "ultra": 700}
+QUALITY_TO_GRID = {"fast": 200, "high": 450, "ultra": 900}
+QUALITY_TO_DETAIL_BOOST = {"fast": 0.8, "high": 1.15, "ultra": 1.7}
 PRINTER_PROFILE_TO_VALUES = {"bambu": (0.22, 0.9), "voron": (0.28, 1.0)}
 
 
@@ -535,7 +536,8 @@ class MainWindow(QMainWindow):
             base_thickness_mm=float(self.base_mm.text()),
             vertical_scale=float(self.vertical_scale.text()),
             track_height_mm=float(self.track_height.text()),
-            grid_res=QUALITY_TO_GRID.get(str(self.quality.currentData()), 400),
+            grid_res=QUALITY_TO_GRID.get(str(self.quality.currentData()), 450),
+            detail_boost=QUALITY_TO_DETAIL_BOOST.get(str(self.quality.currentData()), 1.15),
             separate_frame=self.separate_frame.isChecked(),
             frame_text_enabled=self.frame_text_enabled.isChecked(),
             frame_wall_mm=float(self.frame_wall_mm.text()),
